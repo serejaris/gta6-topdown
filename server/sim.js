@@ -27,6 +27,21 @@ const HIT_CREDIT_T = 5;
 const TEMP_PED_T = 30;
 const STILL_T = 2;
 const COP_LEAVE_T = 10;
+const TRAFFIC_TYPES = [0, 0, 0, 1, 2, 2, 3, 5];
+const MAX_CIVIL = 90;
+const MAX_PEDS = 160;
+const BUBBLE_R = 100;
+const BUBBLE_CARS = 10;
+const BUBBLE_PARKED = 8;
+const BUBBLE_PEDS = 24;
+const PED_BUBBLE_R = 70;
+const SPAWN_LO = 60;
+const SPAWN_HI = 100;
+const PARK_LO = 50;
+const PED_SPAWN_LO = 45;
+const PED_SPAWN_HI = 70;
+const DESPAWN_R = 170;
+const PARK_LANE = 9.6;
 
 const rand = Math.random;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -583,6 +598,7 @@ export function createSim(broadcast, send = () => {}) {
       ev('cash', { id: p.id, amount: 50, x: r2(car.x), z: r2(car.z) });
     }
     car.driver = p.id;
+    car.parked = false;
     car.target = null;
     car.siren = false;
     car.ram = false;
@@ -904,6 +920,7 @@ export function createSim(broadcast, send = () => {}) {
       const c = cars[k];
       if (c.wreck && now - c.wreckAt > 40 && farFromPlayers(c.x, c.z, 80)) { cars.splice(k, 1); continue; }
       if (c.driver === null && !c.wreck && now - c.idleSince > 90 && farFromPlayers(c.x, c.z, 150)) { cars.splice(k, 1); continue; }
+      if (c.parked && c.driver === null && !c.wreck && farFromPlayers(c.x, c.z, DESPAWN_R)) { cars.splice(k, 1); continue; }
       if (c.cop && c.driver === 'npc' && c.target == null && farFromPlayers(c.x, c.z, 120)) { cars.splice(k, 1); continue; }
       if (c.x < -50 || c.z < -50 || c.x > S + 50 || c.z > S + 50) cars.splice(k, 1);
     }
@@ -1147,9 +1164,93 @@ export function createSim(broadcast, send = () => {}) {
     trafficTimer -= dt;
     if (trafficTimer > 0) return;
     trafficTimer = 0.5;
-    const civil = cars.filter((c) => !c.cop && !c.wreck).length;
-    if (civil < N_CARS) spawnTraffic(players.size > 0);
+    const isCivil = (c) => !c.cop && !c.wreck && c.driver === 'npc';
+    let civil = cars.filter(isCivil).length;
+    if (civil < N_CARS) { if (spawnTraffic(players.size > 0)) civil++; }
+    const alive = [...players.values()].filter((p) => !p.dead);
+    const wantCivil = Math.min(MAX_CIVIL, Math.max(N_CARS, alive.length * BUBBLE_CARS + 20));
+    const wantPeds = Math.min(MAX_PEDS, Math.max(N_PEDS, alive.length * BUBBLE_PEDS + 20));
+    for (const p of alive) {
+      let nearCars = 0, nearParked = 0, nearPeds = 0;
+      for (const c of cars) {
+        if (dist2(c.x, c.z, p.x, p.z) > BUBBLE_R * BUBBLE_R) continue;
+        if (isCivil(c)) nearCars++;
+        else if (c.parked && c.driver === null && !c.wreck) nearParked++;
+      }
+      for (const ped of peds) if (!ped.dead && dist2(ped.x, ped.z, p.x, p.z) < PED_BUBBLE_R * PED_BUBBLE_R) nearPeds++;
+      if (nearCars < BUBBLE_CARS) {
+        const far = cars.find((c) => isCivil(c) && now >= c.panicUntil && farFromPlayers(c.x, c.z, DESPAWN_R));
+        if (far) { if (placeCarNear(far, p, SPAWN_LO, SPAWN_HI, false)) far.id = nextId++; }
+        else if (civil < wantCivil) {
+          const car = makeCar(TRAFFIC_TYPES[Math.floor(rand() * TRAFFIC_TYPES.length)]);
+          if (placeCarNear(car, p, SPAWN_LO, SPAWN_HI, false)) { car.v = car.cruise * 0.6; cars.push(car); civil++; }
+        }
+      }
+      if (nearParked < BUBBLE_PARKED) {
+        const car = makeCar(TRAFFIC_TYPES[Math.floor(rand() * TRAFFIC_TYPES.length)]);
+        if (placeCarNear(car, p, PARK_LO, SPAWN_HI, true)) cars.push(car);
+      }
+      if (nearPeds < BUBBLE_PEDS) {
+        const far = peds.find((q) => !q.dead && !q.temp && !q.cross && farFromPlayers(q.x, q.z, DESPAWN_R));
+        if (far) placePedNear(far, p);
+        else if (peds.length < wantPeds) {
+          const ped = makePed(true);
+          if (placePedNear(ped, p)) peds.push(ped);
+        }
+      }
+    }
+    if (civil > wantCivil) {
+      const k = cars.findIndex((c) => isCivil(c) && farFromPlayers(c.x, c.z, DESPAWN_R));
+      if (k >= 0) cars.splice(k, 1);
+    }
+    if (peds.length > wantPeds) {
+      const k = peds.findIndex((q) => (q.dead || farFromPlayers(q.x, q.z, DESPAWN_R)) && farFromPlayers(q.x, q.z, 60));
+      if (k >= 0) peds.splice(k, 1);
+    }
     for (const [k, t] of pairCd) if (t < now - 5) pairCd.delete(k);
+  }
+
+  function placeCarNear(car, p, lo, hi, parked) {
+    const ci = clamp(Math.round((p.x - roads[0]) / CELL), 0, NR - 1);
+    const cj = clamp(Math.round((p.z - roads[0]) / CELL), 0, NR - 1);
+    for (let tries = 0; tries < 30; tries++) {
+      const i = clamp(ci + Math.floor(rand() * 5) - 2, 0, NR - 1);
+      const j = clamp(cj + Math.floor(rand() * 5) - 2, 0, NR - 1);
+      const d = DIRS[Math.floor(rand() * 4)];
+      if (!validDir(i, j, d[0], d[1])) continue;
+      const s = 14 + rand() * (CELL - 28);
+      const lane = parked ? PARK_LANE : LANE_IN;
+      const pt = lanePoint(i, j, d[0], d[1], s, lane);
+      const dd = dist(pt.x, pt.z, p.x, p.z);
+      if (dd < lo || dd > hi) continue;
+      if (!farFromPlayers(pt.x, pt.z, lo)) continue;
+      if (!clearOfCars(pt.x, pt.z, parked ? 7 : 12)) continue;
+      if (parked) {
+        car.x = pt.x; car.z = pt.z; car.a = Math.atan2(d[0], d[1]);
+        car.driver = null; car.v = 0; car.parked = true; car.idleSince = now;
+      } else {
+        placeOnSegment(car, i, j, d[0], d[1], s);
+        car.ram = false; car.reverseUntil = 0; car.stuckT = 0; car.ghostUntil = 0;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function placePedNear(ped, p) {
+    for (let tries = 0; tries < 20; tries++) {
+      const b = blockNear(p.x + (rand() * 2 - 1) * PED_SPAWN_HI, p.z + (rand() * 2 - 1) * PED_SPAWN_HI);
+      const pp = rand() * ringLen(b);
+      const pos = ringPos(b, pp);
+      const dd = dist(pos.x, pos.z, p.x, p.z);
+      if (dd < PED_SPAWN_LO || dd > PED_SPAWN_HI) continue;
+      if (!farFromPlayers(pos.x, pos.z, PED_SPAWN_LO)) continue;
+      ped.bi = b.i; ped.bj = b.j; ped.p = pp; ped.x = pos.x; ped.z = pos.z;
+      ped.cross = null; ped.fleeUntil = 0;
+      ped.id = nextId++;
+      return true;
+    }
+    return false;
   }
 
   return {
