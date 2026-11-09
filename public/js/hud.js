@@ -221,7 +221,9 @@ export function createHud(root, world) {
     setTimeout(() => d.classList.add('out'), 5200);
     setTimeout(() => d.remove(), 6000);
     while (feed.children.length > 6) feed.firstChild.remove();
+    return d;
   }
+  const frenzies = new Map();
 
   function showBig(kind, text, sub, dur) {
     bigKind = kind;
@@ -467,10 +469,26 @@ export function createHud(root, world) {
           if (ev.id === meId) showBig('busted', 'BUSTED', 'минус половина денег · оружие изъято', 3.2);
           break;
         case 'frenzy':
-          if (ev.id === meId) showBig('frenzy', 'KILL FRENZY!', `серия × ${ev.count || 3}`, 2.4);
-          else {
-            const p = (view && view.players || []).find((x) => x.id === ev.id);
-            addFeed(`<span class="k">${esc(p ? p.name : 'кто-то')}</span><span class="how">KILL FRENZY ×${ev.count || 3}</span>`, false);
+          {
+            const nowT = performance.now();
+            const prev = frenzies.get(ev.id);
+            const cont = prev && nowT - prev.t < 6500;
+            const count = Math.max(ev.count || 3, cont ? prev.count : 0);
+            if (ev.id === meId) {
+              if (!cont) showBig('frenzy', 'KILL FRENZY!', `серия × ${count}`, 2.4);
+              else if (bigKind === 'frenzy' && bigTimer > 0) {
+                const sub = big.querySelector('.sub');
+                if (sub) sub.textContent = `серия × ${count}`;
+              }
+              frenzies.set(ev.id, { t: nowT, count, line: null });
+            } else {
+              const p = (view && view.players || []).find((x) => x.id === ev.id);
+              const html = `<span class="k">${esc(p ? p.name : 'кто-то')}</span><span class="how">KILL FRENZY ×${count}</span>`;
+              if (cont && prev.line && prev.line.isConnected && !prev.line.classList.contains('out')) {
+                prev.line.innerHTML = html;
+                frenzies.set(ev.id, { t: nowT, count, line: prev.line });
+              } else frenzies.set(ev.id, { t: nowT, count, line: addFeed(html, false) });
+            }
           }
           break;
         case 'pickup':

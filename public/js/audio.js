@@ -16,6 +16,7 @@ export function createAudio() {
   let radioNext = 0;
   let radioStep = 0;
   let lastView = null;
+  let lastFrenzy = -100;
 
   function build() {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -282,7 +283,11 @@ export function createAudio() {
           if (ev.id === meId) stinger('busted');
           break;
         case 'frenzy':
-          if (ev.id === meId) stinger('frenzy');
+          if (ev.id === meId) {
+            const tf = ctx.currentTime;
+            if (tf - lastFrenzy > 6.5) stinger('frenzy');
+            lastFrenzy = tf;
+          }
           break;
         case 'chat':
           if (ev.from !== meId) tone('sine', 1200, 1500, ctx.currentTime, 0.08, 0.08);
