@@ -12,6 +12,11 @@ const MAX_PER_IP = Number(process.env.MAX_PER_IP) || 4;
 const RATE_DROP = 60;
 const RATE_KILL = 200;
 const REJECT_CODES = { full: 1, ip: 2, banned: 3 };
+const VIEW_R = 160;
+const EVENT_R = 150;
+const LOCAL_EVENTS = new Set(['shot', 'hit', 'explode', 'cash']);
+const BUF_SKIP = 256e3;
+const BUF_KILL = 2e6;
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 const BAN_MS = 30 * 60 * 1000;
@@ -65,7 +70,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024, perMessageDeflate: { threshold: 1024, zlibDeflateOptions: { level: 3 } } });
 const clients = new Map();
 
 function sendTo(ws, msg) {
@@ -76,7 +81,34 @@ function sendTo(ws, msg) {
 
 function broadcast(msg) {
   const data = JSON.stringify(msg);
-  for (const ws of clients.keys()) sendTo(ws, data);
+  const local = msg.t === 'ev' && LOCAL_EVENTS.has(msg.kind) && typeof msg.x === 'number';
+  for (const [ws, pid] of clients) {
+    if (local && pid != null && pid !== msg.id && pid !== msg.by) {
+      const p = sim.pos(pid);
+      if (p && (p.x - msg.x) ** 2 + (p.z - msg.z) ** 2 > EVENT_R * EVENT_R) continue;
+    }
+    sendTo(ws, data);
+  }
+}
+
+function snapFor(parts, pid) {
+  const p = sim.pos(pid);
+  const pick = (list) => {
+    const out = [];
+    for (const o of list) if (!p || o.id === p.car || (o.x - p.x) ** 2 + (o.z - p.z) ** 2 <= VIEW_R * VIEW_R) out.push(o.s);
+    return out.join(',');
+  };
+  return `${parts.head},"cars":[${pick(parts.cars)}],"peds":[${pick(parts.peds)}],"pickups":[${pick(parts.pickups)}]}`;
+}
+
+function sendSnaps() {
+  const parts = sim.snapshotParts();
+  for (const [ws, pid] of clients) {
+    if (pid == null || ws.readyState !== 1) continue;
+    if (ws.bufferedAmount > BUF_KILL) { ws.terminate(); continue; }
+    if (ws.bufferedAmount > BUF_SKIP) continue;
+    sendTo(ws, snapFor(parts, pid));
+  }
 }
 
 const sockets = new Map();
@@ -148,7 +180,7 @@ wss.on('connection', (ws, req) => {
         clients.set(ws, p.id);
         sockets.set(p.id, ws);
         sendTo(ws, { t: 'welcome', id: p.id, seed: SEED, tickRate: TICK_RATE });
-        sendTo(ws, sim.snapshot());
+        sendTo(ws, snapFor(sim.snapshotParts(), p.id));
         return;
       }
       if (pid == null) return;
@@ -188,7 +220,7 @@ setInterval(() => {
   try {
     sim.step(dt);
     tickN++;
-    if (tickN % snapEvery === 0 && clients.size) broadcast(sim.snapshot());
+    if (tickN % snapEvery === 0 && clients.size) sendSnaps();
   } catch (e) {
     console.error('tick error', e);
   }

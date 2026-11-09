@@ -50,14 +50,14 @@
 
 `{t:'welcome', id, seed, tickRate}`
 
-`{t:'snap', time, players, cars, peds, pickups}` — массивы объектов:
+`{t:'snap', time, players, cars, peds, pickups}` — массивы объектов: `players` — все игроки, `cars`, `peds`, `pickups` — только в радиусе 160 м от получателя (своя машина всегда). Числа округлены до 0.01. Сжатие permessage-deflate от 1 КБ; медленному клиенту снапшоты пропускаются (очередь больше 256 КБ), при очереди больше 2 МБ соединение закрывается.
 
 - player: `{id, name, x, z, a, v, hp, armor, car, w, ammo, money, wanted, kills, deaths, dead, color}`; `car` — id машины или `null`; `wanted` 0–5; `ammo` — патроны текущего оружия; `dead` — bool.
 - car: `{id, x, z, a, v, type, color, hp, driver, cop, siren, wreck}`; `type` — индекс `CAR_TYPES`; `driver`: id игрока, `'npc'` или `null`; `color` — `#rrggbb`; `wreck` — сгоревший остов.
 - ped: `{id, x, z, a, v, kind, dead}`; `kind`: `0..5` — гражданские (вариант одежды), `'cop'` — полицейский пешком.
 - pickup: `{id, x, z, kind}`; `kind`: `'pistol'|'uzi'|'shotgun'|'rocket'|'health'|'armor'|'cash'|'bribe'`.
 
-`{t:'ev', kind, ...}` — события:
+`{t:'ev', kind, ...}` — события: `shot`, `hit`, `explode`, `cash` приходят только игрокам в радиусе 150 м от точки события (и самому стрелку или получателю денег), остальные — всем.
 
 - `shot` `{by, x, z, a, w, dist}` — трасса длиной `dist`.
 - `hit` `{x, z, target:'ped'|'player'|'car'|'wall'}`

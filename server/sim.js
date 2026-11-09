@@ -1341,5 +1341,19 @@ export function createSim(broadcast, send = () => {}) {
       const pk = pickups.filter((q) => q.active).map((q) => ({ id: q.id, x: r2(q.x), z: r2(q.z), kind: q.kind }));
       return { t: 'snap', time: r2(now), players: pl, cars: cs, peds: ps, pickups: pk };
     },
+    snapshotParts() {
+      const s = this.snapshot();
+      const part = (o) => ({ id: o.id, x: o.x, z: o.z, s: JSON.stringify(o) });
+      return {
+        head: `{"t":"snap","time":${s.time},"players":${JSON.stringify(s.players)}`,
+        cars: s.cars.map(part),
+        peds: s.peds.map(part),
+        pickups: s.pickups.map(part),
+      };
+    },
+    pos(id) {
+      const p = players.get(id);
+      return p ? { x: p.x, z: p.z, car: p.car } : null;
+    },
   };
 }
