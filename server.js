@@ -26,7 +26,11 @@ function broadcast(msg) {
   for (const ws of clients.keys()) sendTo(ws, data);
 }
 
-const sim = createSim(broadcast);
+const sockets = new Map();
+const sim = createSim(broadcast, (pid, msg) => {
+  const ws = sockets.get(pid);
+  if (ws) sendTo(ws, msg);
+});
 
 server.on('upgrade', (req, socket, head) => {
   const url = (req.url || '').split('?')[0];
@@ -49,6 +53,7 @@ wss.on('connection', (ws) => {
         if (pid != null) return;
         const p = sim.join(msg.name);
         clients.set(ws, p.id);
+        sockets.set(p.id, ws);
         sendTo(ws, { t: 'welcome', id: p.id, seed: SEED, tickRate: TICK_RATE });
         sendTo(ws, sim.snapshot());
         return;
@@ -63,6 +68,7 @@ wss.on('connection', (ws) => {
     const pid = clients.get(ws);
     clients.delete(ws);
     if (pid != null) {
+      sockets.delete(pid);
       try { sim.leave(pid); } catch (e) { console.error('leave error', e); }
     }
   };

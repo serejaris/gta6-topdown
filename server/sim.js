@@ -14,6 +14,11 @@ const CAR_COLORS = ['#e63946', '#f1faee', '#a8dadc', '#457b9d', '#1d3557', '#ff5
 const PICKUP_KINDS = ['pistol', 'uzi', 'uzi', 'shotgun', 'shotgun', 'rocket', 'health', 'health', 'armor', 'armor', 'cash', 'cash', 'cash', 'bribe'];
 const WEAPON_BY_PICKUP = { pistol: 1, uzi: 2, shotgun: 3, rocket: 4 };
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const CAR_MAX_V = 65;
+const FOOT_MAX_V = 12;
+const BUDGET_WINDOW = 1;
+const MOVE_SLACK = 2;
+const ENTER_DIST = 4.5;
 
 const rand = Math.random;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -36,7 +41,7 @@ function rayCircle(ox, oz, dx, dz, cx, cz, r) {
   return Math.max(0, t - Math.sqrt(r * r - p2));
 }
 
-export function createSim(broadcast) {
+export function createSim(broadcast, send = () => {}) {
   const world = generateWorld(SEED);
   const roads = world.roads;
   const NR = roads.length;
@@ -552,7 +557,7 @@ export function createSim(broadcast) {
     const car = carById(id);
     if (!car || car.wreck || car.burning) return;
     if (typeof car.driver === 'number' && players.has(car.driver)) return;
-    if (dist(p.x, p.z, car.x, car.z) > 4.5) return;
+    if (dist(p.x, p.z, car.x, car.z) > ENTER_DIST) return;
     if (car.driver === 'npc') {
       const fx = Math.sin(car.a), fz = Math.cos(car.a);
       const ex = car.x + fz * 2.4, ez = car.z - fx * 2.4;
@@ -597,7 +602,8 @@ export function createSim(broadcast) {
     p.ammo = [Infinity, 60, 0, 0, 0];
     p.wanted = 0; p.dead = false; p.busted = false;
     p.forceUntil = now + 1.5;
-    p.rejects = 0;
+    p.budget = 0;
+    p.budgetAt = Date.now() / 1000;
     for (const c of cops) if (c.target === p.id) c.target = null;
   }
 
@@ -618,19 +624,35 @@ export function createSim(broadcast) {
     ev('busted', { id: p.id });
   }
 
+  function correctPose(p, x, z, a) {
+    const t = Date.now();
+    if (t - (p.lastPosMsg || 0) < 500) return;
+    p.lastPosMsg = t;
+    send(p.id, { t: 'pos', x: r2(x), z: r2(z), a: r2(a), car: p.car });
+  }
+
   function handleSt(p, msg) {
     if (p.dead) return;
     if (!fin(msg.x) || !fin(msg.z)) return;
-    const x = clamp(msg.x, 0, S);
-    const z = clamp(msg.z, 0, S);
+    let x = clamp(msg.x, 0, S);
+    let z = clamp(msg.z, 0, S);
     const car = p.car != null ? carById(p.car) : null;
     const cx = car ? car.x : p.x;
     const cz = car ? car.z : p.z;
+    const t = Date.now() / 1000;
+    const vmax = car ? CAR_MAX_V : FOOT_MAX_V;
+    p.budget = Math.min(vmax * BUDGET_WINDOW + MOVE_SLACK, (p.budget || 0) + vmax * Math.max(0, t - (p.budgetAt || t)));
+    p.budgetAt = t;
     const jump = dist(x, z, cx, cz);
-    if (jump > 20) {
-      if (now < p.forceUntil || p.rejects < 3) { p.rejects++; return; }
-    }
-    p.rejects = 0;
+    const allowed = p.budget + MOVE_SLACK;
+    if (jump > allowed) {
+      if (now < p.forceUntil || jump > allowed + 30) { correctPose(p, cx, cz, car ? car.a : p.a); return; }
+      const k = allowed / jump;
+      x = cx + (x - cx) * k;
+      z = cz + (z - cz) * k;
+      p.budget = 0;
+      correctPose(p, x, z, fin(msg.a) ? msg.a : p.a);
+    } else p.budget = Math.max(0, p.budget - jump);
     const a = fin(msg.a) ? msg.a : p.a;
     const v = fin(msg.v) ? clamp(msg.v, -60, 60) : 0;
     if (car && car.driver === p.id && !car.wreck) {
@@ -1070,7 +1092,7 @@ export function createSim(broadcast) {
         id, name: clean, x: 0, z: 0, a: 0, v: 0, hp: 100, armor: 0, car: null, w: 1,
         ammo: [Infinity, 60, 0, 0, 0], money: 0, wanted: 0, kills: 0, deaths: 0, dead: false, busted: false,
         color: PLAYER_COLORS[players.size % PLAYER_COLORS.length],
-        lastShot: 0, lastCrime: 0, decayFrom: 0, killTimes: [], rejects: 0, forceUntil: 0, deadAt: 0,
+        lastShot: 0, lastCrime: 0, decayFrom: 0, killTimes: [], forceUntil: 0, deadAt: 0, budget: 0, budgetAt: 0, lastPosMsg: 0,
       };
       players.set(id, p);
       respawn(p);
