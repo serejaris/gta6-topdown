@@ -204,10 +204,10 @@ export function buildCity(scene, world, T) {
   trimMesh.castShadow = trimMesh.receiveShadow = true;
   group.add(trimMesh);
   const neonMat = patchFade(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }));
-  neonMat.color.setScalar(1.6);
+  neonMat.color.setScalar(1.15);
   const neonMesh = new THREE.Mesh(neon.geometry(), neonMat);
   group.add(neonMesh);
-  animated.push((t) => { neonMat.color.setScalar(1.45 + Math.sin(t * 2.1) * 0.1 + (Math.sin(t * 23) > 0.97 ? -0.6 : 0)); });
+  animated.push((t) => { neonMat.color.setScalar(1.1 + Math.sin(t * 2.1) * 0.06 + (Math.sin(t * 23) > 0.97 ? -0.45 : 0)); });
 
   const decal = (tex, list, fn, opts = {}) => {
     const geo = new THREE.PlaneGeometry(1, 1);

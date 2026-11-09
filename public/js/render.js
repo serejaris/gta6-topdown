@@ -59,7 +59,7 @@ export function createRenderer(canvas, world) {
       const comp = new a.EffectComposer(renderer);
       comp.addPass(new b.RenderPass(scene, camera));
       const sz = renderer.getDrawingBufferSize(new THREE.Vector2());
-      const bloom = new c.UnrealBloomPass(new THREE.Vector2(sz.x / 2, sz.y / 2), 0.55, 0.45, 0.82);
+      const bloom = new c.UnrealBloomPass(new THREE.Vector2(sz.x / 2, sz.y / 2), 0.42, 0.2, 0.9);
       const bloomSetSize = bloom.setSize.bind(bloom);
       bloom.setSize = (w, h) => bloomSetSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
       comp.addPass(bloom);
