@@ -4,6 +4,8 @@ import { serveStatic } from './server/static.js';
 import { createSim, SEED, TICK_RATE, SNAP_RATE } from './server/sim.js';
 
 const PORT = Number(process.env.PORT) || 3000;
+const PING_MS = 5000;
+const IDLE_MS = 15000;
 
 const server = http.createServer((req, res) => {
   serveStatic(req, res).catch(() => {
@@ -43,7 +45,11 @@ server.on('upgrade', (req, socket, head) => {
 
 wss.on('connection', (ws) => {
   clients.set(ws, null);
+  ws.isAlive = true;
+  ws.lastMsgAt = Date.now();
+  ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (raw) => {
+    ws.lastMsgAt = Date.now();
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return;
@@ -75,6 +81,18 @@ wss.on('connection', (ws) => {
   ws.on('close', drop);
   ws.on('error', drop);
 });
+
+let pingN = 0;
+setInterval(() => {
+  const t = Date.now();
+  const ping = ++pingN % 2 === 0;
+  for (const ws of clients.keys()) {
+    if ((ping && !ws.isAlive) || t - ws.lastMsgAt > IDLE_MS) { ws.terminate(); continue; }
+    if (!ping) continue;
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  }
+}, PING_MS / 2);
 
 const dt = 1 / TICK_RATE;
 let tickN = 0;
