@@ -74,7 +74,6 @@ function start(name) {
   });
   safe(() => hud?.onChat?.((text) => net.send({ t: 'chat', text: String(text).slice(0, 120) })));
 
-  addEventListener('resize', () => safe(() => state.renderer?.resize?.()));
 
   let last = performance.now();
   function frame(ts) {

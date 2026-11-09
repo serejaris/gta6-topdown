@@ -795,6 +795,7 @@ export function createGame({ world, net, bot = false }) {
     if (lastSrv) {
       for (const k of ['hp', 'armor', 'ammo', 'money', 'wanted', 'kills', 'deaths', 'name', 'color']) if (lastSrv[k] !== undefined) me[k] = lastSrv[k];
     }
+    if (lastSrv && lastSrv.w !== curW) me.ammo = null;
     me.w = curW;
     me.dead = local.dead;
     me.car = local.car;

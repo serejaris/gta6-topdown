@@ -260,15 +260,24 @@ export function createAudio() {
           if (ev.id === meId) jingle([72, 76, 79, 84], 'triangle', 0.06, 0.3);
           break;
         case 'pickup':
+        case 'pistol':
+        case 'uzi':
+        case 'shotgun':
+        case 'rocket':
+        case 'health':
+        case 'armor':
+        case 'bribe': {
           if (ev.by !== meId) break;
-          if (ev.kind === 'cash' || ev.kind === 'bribe') jingle([76, 79, 84, 88], 'square', 0.06, 0.12);
-          else if (ev.kind === 'health' || ev.kind === 'armor') jingle([67, 72, 76], 'sine', 0.08, 0.35);
+          const kind = ev.kind === 'pickup' ? ev.item : ev.kind;
+          if (kind === 'cash' || kind === 'bribe') jingle([76, 79, 84, 88], 'square', 0.06, 0.12);
+          else if (kind === 'health' || kind === 'armor') jingle([67, 72, 76], 'sine', 0.08, 0.35);
           else {
             const t = ctx.currentTime;
             noise(t, 0.05, 0.4, 'highpass', 2000, 2000);
             noise(t + 0.12, 0.06, 0.5, 'bandpass', 1500, 1500, 2);
           }
           break;
+        }
         case 'carjack':
           if (ev.by === meId) {
             const t = ctx.currentTime;
