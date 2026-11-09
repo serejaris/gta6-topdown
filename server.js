@@ -6,6 +6,11 @@ import { createSim, SEED, TICK_RATE, SNAP_RATE } from './server/sim.js';
 const PORT = Number(process.env.PORT) || 3000;
 const PING_MS = 5000;
 const IDLE_MS = 15000;
+const MAX_PLAYERS = Number(process.env.MAX_PLAYERS) || 24;
+const MAX_PER_IP = Number(process.env.MAX_PER_IP) || 4;
+const RATE_DROP = 60;
+const RATE_KILL = 200;
+const REJECT_CODES = { full: 1, ip: 2, banned: 3 };
 
 const server = http.createServer((req, res) => {
   serveStatic(req, res).catch(() => {
@@ -14,7 +19,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 });
 const clients = new Map();
 
 function sendTo(ws, msg) {
@@ -43,13 +48,47 @@ server.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
 });
 
-wss.on('connection', (ws) => {
+function clientIp(req) {
+  const real = req.headers['x-real-ip'];
+  if (typeof real === 'string' && real) return real.trim();
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) {
+    const parts = fwd.split(',');
+    return parts[parts.length - 1].trim();
+  }
+  return req.socket.remoteAddress || '';
+}
+
+function reject(ws, reason) {
+  sendTo(ws, { t: 'reject', reason });
+  setTimeout(() => ws.close(4000 + (REJECT_CODES[reason] || 0), reason), 50);
+}
+
+const ipCount = new Map();
+
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  ws.ip = ip;
+  const n = (ipCount.get(ip) || 0) + 1;
+  ipCount.set(ip, n);
+  ws.once('close', () => {
+    const left = (ipCount.get(ip) || 1) - 1;
+    if (left > 0) ipCount.set(ip, left); else ipCount.delete(ip);
+  });
+  if (n > MAX_PER_IP) { reject(ws, 'ip'); return; }
   clients.set(ws, null);
   ws.isAlive = true;
   ws.lastMsgAt = Date.now();
+  ws.rateAt = Date.now();
+  ws.rateN = 0;
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (raw) => {
-    ws.lastMsgAt = Date.now();
+    const t = Date.now();
+    ws.lastMsgAt = t;
+    if (t - ws.rateAt >= 1000) { ws.rateAt = t; ws.rateN = 0; }
+    ws.rateN++;
+    if (ws.rateN > RATE_KILL) { ws.terminate(); return; }
+    if (ws.rateN > RATE_DROP) return;
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
     if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return;
@@ -57,6 +96,7 @@ wss.on('connection', (ws) => {
       let pid = clients.get(ws);
       if (msg.t === 'join') {
         if (pid != null) return;
+        if (sockets.size >= MAX_PLAYERS) { reject(ws, 'full'); return; }
         const p = sim.join(msg.name);
         clients.set(ws, p.id);
         sockets.set(p.id, ws);
