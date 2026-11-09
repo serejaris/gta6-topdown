@@ -1,6 +1,8 @@
 import { collideCircle, isRoad, WEAPONS, CAR_TYPES } from '/shared/world.js';
 
-const INTERP_DELAY = 0.12;
+const INTERP_MIN = 0.15;
+const INTERP_MAX = 0.4;
+const EXTRAP_MAX = 0.25;
 const SEND_RATE = 1 / 15;
 const FOOT_R = 0.45;
 const WALK = 5;
@@ -28,6 +30,22 @@ function interpList(m0, m1, t) {
     o.x = lerp(a.x, b.x, t);
     o.z = lerp(a.z, b.z, t);
     if (typeof a.a === 'number' && typeof b.a === 'number') o.a = a.a + wrapAngle(b.a - a.a) * t;
+    out.push(o);
+  }
+  return out;
+}
+
+function extrapList(m0, m1, gap, ext) {
+  const out = [];
+  for (const [id, b] of m1) {
+    const o = { ...b };
+    const a = m0 && m0.get(id);
+    if (!b.dead && !b.wreck) {
+      let vx, vz;
+      if (a && gap > 0.01) { vx = (b.x - a.x) / gap; vz = (b.z - a.z) / gap; }
+      else { vx = (b.v || 0) * Math.sin(b.a || 0); vz = (b.v || 0) * Math.cos(b.a || 0); }
+      if (Math.hypot(vx, vz) < 70) { o.x = b.x + vx * ext; o.z = b.z + vz * ext; }
+    }
     out.push(o);
   }
   return out;
@@ -61,6 +79,7 @@ export function createGame({ world, net, bot = false }) {
   let exitedCar = null;
   let lastSrv = null;
   let basis = { ux: 0, uz: -1, rx: 1, rz: 0, leftSign: 1, t: -1 };
+  const clock = { off: null, jitter: 0.02, gap: 0.1, delay: 0.2, last: -1 };
 
   const local = {
     have: false,
@@ -93,6 +112,8 @@ export function createGame({ world, net, bot = false }) {
 
   function onWelcome(msg) {
     snaps.length = 0;
+    clock.off = null;
+    clock.last = -1;
     local.have = false;
     local.car = null;
     local.cs = null;
@@ -119,10 +140,30 @@ export function createGame({ world, net, bot = false }) {
     local.car = car.id;
   }
 
+  function srvClock(t, st) {
+    if (clock.last >= 0 && (st < clock.last - 1 || st > clock.last + 30)) { snaps.length = 0; clock.off = null; clock.last = -1; }
+    if (clock.last >= 0 && st > clock.last) clock.gap += (clamp(st - clock.last, 0.02, 0.5) - clock.gap) * 0.1;
+    clock.last = Math.max(clock.last, st);
+    const sample = t - st;
+    if (clock.off == null || sample < clock.off) clock.off = sample;
+    else clock.off += (sample - clock.off) * 0.005;
+    const late = sample - clock.off;
+    clock.jitter += (late - clock.jitter) * (late > clock.jitter ? 0.25 : 0.02);
+  }
+
+  function renderTime(dt) {
+    const want = clamp(clock.gap + clock.jitter * 1.5 + 0.04, INTERP_MIN, INTERP_MAX);
+    clock.delay += (want - clock.delay) * Math.min(1, dt * (want > clock.delay ? 4 : 0.5));
+    return now() - (clock.off ?? 0) - clock.delay;
+  }
+
   function onSnap(msg) {
     const t = now();
+    const st = Number.isFinite(msg.time) ? msg.time : t;
+    srvClock(t, st);
+    if (snaps.length && st <= snaps[snaps.length - 1].t) return;
     const s = {
-      t,
+      t: st,
       players: toMap(msg.players),
       cars: toMap(msg.cars),
       peds: toMap(msg.peds),
@@ -201,14 +242,23 @@ export function createGame({ world, net, bot = false }) {
     } catch {}
   }
 
-  function interpolate() {
+  function interpolate(dt) {
     if (!snaps.length) return null;
-    const rt = now() - INTERP_DELAY;
+    const rt = renderTime(dt);
     let s0 = snaps[0], s1 = snaps[0];
+    const last = snaps[snaps.length - 1];
     if (rt <= snaps[0].t) {
       s0 = s1 = snaps[0];
-    } else if (rt >= snaps[snaps.length - 1].t) {
-      s0 = s1 = snaps[snaps.length - 1];
+    } else if (rt >= last.t) {
+      const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+      const gap = prev ? last.t - prev.t : 0;
+      const ext = Math.min(rt - last.t, EXTRAP_MAX);
+      return {
+        players: extrapList(prev?.players, last.players, gap, ext),
+        cars: extrapList(prev?.cars, last.cars, gap, ext),
+        peds: extrapList(prev?.peds, last.peds, gap, ext),
+        pickups: last.pickups,
+      };
     } else {
       for (let i = 0; i < snaps.length - 1; i++) {
         if (snaps[i].t <= rt && rt < snaps[i + 1].t) { s0 = snaps[i]; s1 = snaps[i + 1]; break; }
@@ -570,7 +620,7 @@ export function createGame({ world, net, bot = false }) {
     view.connected = !!net?.connected;
     updateBasis(screenW || innerWidth, screenH || innerHeight);
 
-    const ip = interpolate();
+    const ip = interpolate(dt);
     const id = net?.id ?? view.me.id;
     view.me.id = id;
     if (ip) {
