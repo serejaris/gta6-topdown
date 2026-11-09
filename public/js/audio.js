@@ -205,12 +205,34 @@ export function createAudio() {
     window.dispatchEvent(new CustomEvent('gta-radio', { detail: { on: radioOn } }));
   });
 
+  document.addEventListener('visibilitychange', () => {
+    if (!ctx) return;
+    try {
+      if (document.hidden) ctx.suspend();
+      else ctx.resume();
+    } catch {}
+  });
+
+  function silenceLoops(t) {
+    engGain.gain.cancelScheduledValues(t);
+    engGain.gain.setTargetAtTime(0, t, 0.05);
+    sirGain.gain.cancelScheduledValues(t);
+    sirGain.gain.setTargetAtTime(0, t, 0.05);
+    radioBus.gain.cancelScheduledValues(t);
+    radioBus.gain.setTargetAtTime(0, t, 0.05);
+    radioNext = 0;
+  }
+
   return {
     unlock() {
       try {
         if (!ctx) build();
-        if (ctx.state !== 'running') ctx.resume();
+        if (ctx.state !== 'running' && !document.hidden) ctx.resume();
       } catch {}
+    },
+
+    state() {
+      return ctx ? { state: ctx.state, eng: engGain.gain.value, sir: sirGain.gain.value, radio: radioBus.gain.value } : null;
     },
 
     event(ev, view) {
@@ -273,6 +295,7 @@ export function createAudio() {
       lastView = view;
       const me = view.me || {};
       const t = ctx.currentTime;
+      if (!view.connected) { silenceLoops(t); return; }
       const driving = !!me.car && !me.dead;
       const sp = Math.abs(me.v || 0);
       const gear = Math.min(4, Math.floor(sp / 9));
