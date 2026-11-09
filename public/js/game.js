@@ -56,6 +56,9 @@ export function createGame({ world, net, bot = false }) {
   let pendingW = null;
   let pendingWUntil = 0;
   let enterSentAt = -10;
+  let exitSentAt = -10;
+  let snapsSinceEnter = 0;
+  let exitedCar = null;
   let lastSrv = null;
   let basis = { ux: 0, uz: -1, rx: 1, rz: 0, leftSign: 1, t: -1 };
 
@@ -132,6 +135,7 @@ export function createGame({ world, net, bot = false }) {
     if (!srv) return;
     lastSrv = srv;
     local.dead = !!srv.dead;
+    snapsSinceEnter++;
 
     if (!local.have || (adoptAfter && t >= adoptAfter && !srv.dead)) {
       adoptServerPose(srv);
@@ -145,7 +149,11 @@ export function createGame({ world, net, bot = false }) {
       return;
     }
 
+    const exiting = t - exitSentAt < 1;
+    if (srv.car == null) exitSentAt = -10;
+    if (srv.car != null) enterSentAt = -10;
     if (srv.car != null && local.car !== srv.car) {
+      if (exiting && exitedCar && exitedCar.id === srv.car) return;
       const car = s.cars.get(srv.car);
       if (car) initCarState(car);
     } else if (srv.car == null && local.car != null) {
@@ -597,8 +605,47 @@ export function createGame({ world, net, bot = false }) {
     view.nearCar = findNearCar();
 
     if (it.enter && local.have && !local.dead) {
-      if (local.car != null) net?.send({ t: 'exit' });
-      else if (view.nearCar != null) { net?.send({ t: 'enter', car: view.nearCar }); enterSentAt = t; }
+      if (local.car != null && local.cs) {
+        const cs = local.cs;
+        net?.send({ t: 'st', x: +cs.x.toFixed(2), z: +cs.z.toFixed(2), a: +cs.a.toFixed(3), v: +cs.vf.toFixed(2), car: cs.id });
+        net?.send({ t: 'exit' });
+        exitSentAt = t;
+        exitedCar = { id: cs.id, type: cs.type, x: cs.x, z: cs.z, a: cs.a, v: cs.vf, t };
+        const fx = Math.sin(cs.a), fz = Math.cos(cs.a);
+        const r = collideCircle(world, cs.x + fz * 2.4, cs.z - fx * 2.4, FOOT_R);
+        local.x = r.x; local.z = r.z; local.a = cs.a; local.v = 0;
+        local.car = null;
+        local.cs = null;
+        sendTimer = SEND_RATE;
+      } else if (local.car == null && view.nearCar != null && t - enterSentAt > 0.5) {
+        net?.send({ t: 'enter', car: view.nearCar });
+        enterSentAt = t;
+        snapsSinceEnter = 0;
+      }
+    }
+    if (exitedCar) {
+      const ec = exitedCar;
+      const age = t - ec.t;
+      const vc = view.cars.find((c) => c.id === ec.id);
+      if (!vc || age > 2.5 || (age > 0.8 && Math.abs(ec.v) < 0.5 && Math.hypot(vc.x - ec.x, vc.z - ec.z) < 0.15)) exitedCar = null;
+      else {
+        ec.v *= Math.exp(-3.25 * dt);
+        ec.x += Math.sin(ec.a) * ec.v * dt;
+        ec.z += Math.cos(ec.a) * ec.v * dt;
+        for (const cc of carCircles(ec)) {
+          const r = collideCircle(world, cc.x, cc.z, cc.r);
+          if (r.hit) { ec.x += r.x - cc.x; ec.z += r.z - cc.z; ec.v = 0; }
+        }
+        if (age > 0.3) {
+          const k = Math.min(1, dt * 4);
+          ec.x += (vc.x - ec.x) * k;
+          ec.z += (vc.z - ec.z) * k;
+          ec.a += wrapAngle(vc.a - ec.a) * k;
+        }
+        for (let i = 0; i < view.cars.length; i++) {
+          if (view.cars[i].id === ec.id) view.cars[i] = { ...view.cars[i], x: ec.x, z: ec.z, a: ec.a, v: ec.v, driver: null };
+        }
+      }
     }
 
     const srvW = lastSrv?.w ?? view.me.w ?? 1;
@@ -632,9 +679,10 @@ export function createGame({ world, net, bot = false }) {
     }
 
     sendTimer -= dt;
-    if (sendTimer <= 0 && local.have && !local.dead) {
+    const awaitingEnter = local.car == null && t - enterSentAt < 1 && snapsSinceEnter < 3;
+    if (sendTimer <= 0 && local.have && !local.dead && !awaitingEnter) {
       sendTimer = SEND_RATE;
-      net?.send({ t: 'st', x: +local.x.toFixed(2), z: +local.z.toFixed(2), a: +local.a.toFixed(3), v: +local.v.toFixed(2) });
+      net?.send({ t: 'st', x: +local.x.toFixed(2), z: +local.z.toFixed(2), a: +local.a.toFixed(3), v: +local.v.toFixed(2), car: local.car });
     }
 
     const me = view.me;
