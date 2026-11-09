@@ -352,6 +352,12 @@ export function createHud(root, world) {
               <div class="sec">ЕЩЁ</div>
               <kbd>T</kbd><span>чат · Tab — таблица лидеров</span>
             </div>
+            <div class="h-keys h-touchkeys">
+              <div class="sec">С ТЕЛЕФОНА</div>
+              <kbd>ЛЕВЫЙ</kbd><span>палец слева — ходьба и руль</span>
+              <kbd>ПРАВЫЙ</kbd><span>палец справа — прицел, до упора — огонь</span>
+              <kbd>КНОПКИ</kbd><span>огонь · машина · оружие</span>
+            </div>
           </form>
         </div>`;
       const form = scr.querySelector('form');

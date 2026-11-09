@@ -76,6 +76,7 @@ export function createGame({ world, net, bot = false }) {
   let pendingWUntil = 0;
   const owned = [true, true, false, false, false];
   let fireQueuedUntil = 0;
+  let touchFiring = false;
   let enterSentAt = -10;
   let exitSentAt = -10;
   let snapsSinceEnter = 0;
@@ -301,7 +302,42 @@ export function createGame({ world, net, bot = false }) {
     };
   }
 
+  function touchIntent(inp, tc) {
+    const dead = (v) => (Math.abs(v) < 0.15 ? 0 : v);
+    const my = -dead(tc.my), mx = dead(tc.mx);
+    let moveX = basis.ux * my + basis.rx * mx;
+    let moveZ = basis.uz * my + basis.rz * mx;
+    const ml = Math.hypot(moveX, moveZ);
+    if (ml > 1) { moveX /= ml; moveZ /= ml; }
+    let aimX = null, aimZ = null;
+    if (tc.aiming) {
+      const ay = -tc.ay, ax = tc.ax;
+      let dx = basis.ux * ay + basis.rx * ax, dz = basis.uz * ay + basis.rz * ax;
+      const l = Math.hypot(dx, dz) || 1;
+      aimX = local.x + dx / l * 12;
+      aimZ = local.z + dz / l * 12;
+    }
+    return {
+      moveX, moveZ,
+      run: ml > 0.85,
+      throttle: Math.abs(my) > 0.25 ? Math.sign(my) : 0,
+      turn: clamp(-mx * 1.4, -1, 1) * basis.leftSign,
+      handbrake: false,
+      aimX, aimZ,
+      fire: tc.fire,
+      firePressed: tc.firePressed || (tc.fire && !touchFiring),
+      enter: inp.pressed.has('KeyF'),
+      weapon: null,
+      weaponDelta: inp.wheel,
+    };
+  }
+
   function humanIntent(inp) {
+    if (inp.touch?.active) {
+      const it = touchIntent(inp, inp.touch);
+      touchFiring = inp.touch.fire;
+      return it;
+    }
     const d = inp.down;
     const up = d.has('KeyW') || d.has('ArrowUp');
     const dn = d.has('KeyS') || d.has('ArrowDown');
