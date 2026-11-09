@@ -25,6 +25,8 @@
 
 - `node server.js`, порт `process.env.PORT || 3000`, слушать `0.0.0.0`.
 - Статика: `/` → `public/`, `/shared/*` → `shared/`, `/vendor/three.module.js` → `node_modules/three/build/three.module.js` (и `/vendor/*` из `node_modules/three/build/`, `/vendor/addons/*` из `node_modules/three/examples/jsm/`). `GET /health` → `ok`.
+- Ники и чат проходят стоп-лист (`server/names.js`, кириллица и латиница с нормализацией похожих букв и цифр): плохой ник становится `Player<id>`, плохое слово в чате — `***`.
+- Админка по секрету из переменной окружения `ADMIN_SECRET` (заголовок `X-Admin-Secret`; без переменной админка выключена): `GET /admin/players` — список `{id, name, ip}`, `POST /admin/rename?id=N` — ник в `Player<id>`, `POST /admin/kick?id=N` — выкинуть с `reject` `banned` и бан адреса на 30 минут (`&ban=0` — без бана).
 - WebSocket на пути `/ws`, сообщения JSON. Одна общая комната, seed мира фиксирован (`SEED = 6`).
 - Тик симуляции 20 Гц, снапшот всем 10 Гц.
 - Соединение без ответа на ping (раз в 5 с) или без единого сообщения клиента 15 с сервер закрывает, игрок уходит из города (`leave`).

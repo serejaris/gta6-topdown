@@ -1,4 +1,5 @@
 import { CFG, generateWorld, isRoad, collideCircle, raycast, WEAPONS, CAR_TYPES } from '../shared/world.js';
+import { cleanName, cleanChat } from './names.js';
 
 export const SEED = 6;
 export const TICK_RATE = 20;
@@ -1155,8 +1156,8 @@ export function createSim(broadcast, send = () => {}) {
     world,
     internals: { cars, peds, cops, players },
     join(name) {
-      const clean = String(typeof name === 'string' ? name : '').replace(/[^\p{L}\p{N} _.\-]/gu, '').trim().slice(0, 16) || `Player${nextId}`;
       const id = nextId++;
+      const clean = cleanName(name, id);
       const p = {
         id, name: clean, x: 0, z: 0, a: 0, v: 0, hp: 100, armor: 0, car: null, w: 1,
         ammo: [Infinity, 60, 0, 0, 0], money: 0, wanted: 0, kills: 0, deaths: 0, dead: false, busted: false,
@@ -1167,6 +1168,13 @@ export function createSim(broadcast, send = () => {}) {
       respawn(p);
       ev('join', { id, name: clean });
       return p;
+    },
+    rename(id) {
+      const p = players.get(id);
+      if (p) p.name = `Player${id}`;
+    },
+    list() {
+      return [...players.values()].map((p) => ({ id: p.id, name: p.name }));
     },
     leave(id) {
       const p = players.get(id);
@@ -1196,7 +1204,7 @@ export function createSim(broadcast, send = () => {}) {
           break;
         case 'chat': {
           if (typeof msg.text !== 'string') break;
-          const text = msg.text.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120);
+          const text = cleanChat(msg.text.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120));
           if (text && pairReady(`chat${id}`, 0.4)) ev('chat', { from: id, name: p.name, text });
           break;
         }

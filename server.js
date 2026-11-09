@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import { serveStatic } from './server/static.js';
 import { createSim, SEED, TICK_RATE, SNAP_RATE } from './server/sim.js';
@@ -12,7 +13,52 @@ const RATE_DROP = 60;
 const RATE_KILL = 200;
 const REJECT_CODES = { full: 1, ip: 2, banned: 3 };
 
+const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
+const BAN_MS = 30 * 60 * 1000;
+const bans = new Map();
+
+function isBanned(ip) {
+  const until = bans.get(ip);
+  if (!until) return false;
+  if (until > Date.now()) return true;
+  bans.delete(ip);
+  return false;
+}
+
+function adminOk(req) {
+  if (!ADMIN_SECRET) return false;
+  const got = Buffer.from(String(req.headers['x-admin-secret'] || ''));
+  const want = Buffer.from(ADMIN_SECRET);
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
+
+function admin(req, res, url) {
+  const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+  if (!adminOk(req)) return json(403, { error: 'forbidden' });
+  const id = Number(url.searchParams.get('id'));
+  if (url.pathname === '/admin/players' && req.method === 'GET') {
+    const list = sim.list().map((p) => ({ ...p, ip: sockets.get(p.id)?.ip || null }));
+    return json(200, list);
+  }
+  if (req.method !== 'POST') return json(405, { error: 'method' });
+  const ws = sockets.get(id);
+  if (!ws) return json(404, { error: 'no such player' });
+  if (url.pathname === '/admin/rename') { sim.rename(id); return json(200, { ok: true }); }
+  if (url.pathname === '/admin/kick') {
+    if (url.searchParams.get('ban') !== '0') bans.set(ws.ip, Date.now() + BAN_MS);
+    sim.rename(id);
+    reject(ws, 'banned');
+    return json(200, { ok: true });
+  }
+  return json(404, { error: 'unknown' });
+}
+
 const server = http.createServer((req, res) => {
+  const url = new URL(req.url || '/', 'http://x');
+  if (url.pathname.startsWith('/admin/')) {
+    try { admin(req, res, url); } catch { if (!res.headersSent) res.writeHead(500); res.end(); }
+    return;
+  }
   serveStatic(req, res).catch(() => {
     if (!res.headersSent) res.writeHead(500);
     res.end();
@@ -75,6 +121,7 @@ wss.on('connection', (ws, req) => {
     const left = (ipCount.get(ip) || 1) - 1;
     if (left > 0) ipCount.set(ip, left); else ipCount.delete(ip);
   });
+  if (isBanned(ip)) { reject(ws, 'banned'); return; }
   if (n > MAX_PER_IP) { reject(ws, 'ip'); return; }
   clients.set(ws, null);
   ws.isAlive = true;
