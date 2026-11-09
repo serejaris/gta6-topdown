@@ -861,5 +861,29 @@ export function createGame({ world, net, bot = false }) {
     return view;
   }
 
-  return { view, local, setWorld, setRenderer, onWelcome, onSnap, onEvent, update, isRoad: (x, z) => isRoad(world, x, z) };
+  function onPos(msg) {
+    if (!Number.isFinite(msg.x) || !Number.isFinite(msg.z) || local.dead) return;
+    const a = Number.isFinite(msg.a) ? msg.a : local.a;
+    if ((msg.car ?? null) !== (local.car ?? null)) return;
+    if (Math.hypot(msg.x - local.x, msg.z - local.z) > 60) {
+      try { renderer?.resetCamera?.(); } catch {}
+    }
+    if (local.cs) {
+      const cs = local.cs;
+      cs.x = msg.x; cs.z = msg.z; cs.a = a; cs.vx = 0; cs.vz = 0; cs.vf = 0;
+    }
+    local.x = msg.x; local.z = msg.z; local.a = a; local.v = 0;
+    sendTimer = 0;
+    lastAdopt = now();
+  }
+
+  function keepalive() {
+    if (!net?.connected) return;
+    if (local.have && !local.dead) {
+      const x = local.cs ? local.cs.x : local.x, z = local.cs ? local.cs.z : local.z, a = local.cs ? local.cs.a : local.a;
+      net.send({ t: 'st', x: +x.toFixed(2), z: +z.toFixed(2), a: +a.toFixed(3), v: 0, car: local.car });
+    } else net.send({ t: 'ka' });
+  }
+
+  return { view, local, setWorld, setRenderer, onWelcome, onSnap, onEvent, onPos, keepalive, update, isRoad: (x, z) => isRoad(world, x, z) };
 }
