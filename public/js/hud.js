@@ -444,7 +444,8 @@ export function createHud(root, world) {
         cache.bt = (cache.bt || 0) + dt;
         if (cache.bt > 0.5) { cache.bt = 0; renderBoard(view); }
       }
-      drawMap(view);
+      cache.mt = (cache.mt || 0) + dt;
+      if (cache.mt >= 0.1) { cache.mt = 0; drawMap(view); }
     },
 
     event(ev, view) {

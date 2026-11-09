@@ -4,7 +4,8 @@ import { Builder } from './geo.js';
 import { textSprite } from './textures.js';
 
 const HS = 1.6;
-const SHIRTS = ['#e63946', '#f4a261', '#2a9d8f', '#e9c46a', '#8338ec', '#ff70a6'];
+let carShared = null;
+const SHIRTS =['#e63946', '#f4a261', '#2a9d8f', '#e9c46a', '#8338ec', '#ff70a6'];
 const PANTS = ['#264653', '#3d405b', '#6b705c', '#1d3557', '#5c4033', '#2b2d42'];
 const SKIN = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
 
@@ -20,6 +21,8 @@ function lam(hex) {
   if (!matCache[hex]) matCache[hex] = new THREE.MeshLambertMaterial({ color: hex });
   return matCache[hex];
 }
+
+let humanShared = null;
 
 export function makeHuman(T, opts) {
   const g = new THREE.Group();
@@ -54,11 +57,19 @@ export function makeHuman(T, opts) {
     const cap = new THREE.Mesh(boxGeo(0.36, 0.1, 0.42, 1.86), lam('#101a3a'));
     body.add(cap);
   }
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.blob, transparent: true, depthWrite: false }));
+  if (!humanShared) {
+    humanShared = {
+      shadowGeo: new THREE.PlaneGeometry(1.4, 1.4).rotateX(-Math.PI / 2),
+      shadowMat: new THREE.MeshBasicMaterial({ map: T.blob, transparent: true, depthWrite: false }),
+      bloodGeo: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      bloodMat: new THREE.MeshBasicMaterial({ map: T.blood, transparent: true, depthWrite: false }),
+    };
+  }
+  const shadow = new THREE.Mesh(humanShared.shadowGeo, humanShared.shadowMat);
   shadow.position.y = 0.03;
   shadow.renderOrder = 1;
   g.add(shadow);
-  const blood = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.blood, transparent: true, depthWrite: false }));
+  const blood = new THREE.Mesh(humanShared.bloodGeo, humanShared.bloodMat);
   blood.position.y = 0.04;
   blood.visible = false;
   blood.renderOrder = 1;
@@ -88,7 +99,7 @@ function setGun(h, w) {
   }
 }
 
-export function poseHuman(h, o, dt, t) {
+export function poseHuman(h, o, dt, t, wOver) {
   const sp = Math.min(Math.abs(o.v || 0), 9);
   h.g.position.set(o.x, 0.15, o.z);
   h.g.rotation.y = o.a || 0;
@@ -116,7 +127,7 @@ export function poseHuman(h, o, dt, t) {
   const s = Math.sin(h.phase) * amp;
   h.legL.rotation.x = s;
   h.legR.rotation.x = -s;
-  const w = o.w || 0;
+  const w = wOver ?? (o.w || 0);
   setGun(h, w);
   h.armL.rotation.set(-s * 0.8, 0, 0);
   if (w > 0) {
@@ -205,6 +216,7 @@ function carGeometry(type) {
 const fixedMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 const lightMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
 const wreckMat = new THREE.MeshLambertMaterial({ color: 0x141212 });
+const SIREN_R = new THREE.Color(0xff1030), SIREN_B = new THREE.Color(0x1060ff);
 
 export function makeCar(T, type, color, cop) {
   const geo = carGeometry(type);
@@ -218,12 +230,21 @@ export function makeCar(T, type, color, cop) {
   paint.castShadow = true;
   paint.receiveShadow = true;
   g.add(paint, fixed, lights, tail);
-  const beam = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.glow, color: 0xfff0c8, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }));
+  if (!carShared) {
+    carShared = {
+      beamGeo: new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      beamMat: new THREE.MeshBasicMaterial({ map: T.glow, color: 0xfff0c8, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }),
+      shadowMat: new THREE.MeshBasicMaterial({ map: T.blob, transparent: true, depthWrite: false }),
+      glowGeo: new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2),
+    };
+  }
+  if (!geo.shadowGeo) geo.shadowGeo = new THREE.PlaneGeometry(geo.W + 1.2, geo.L + 1.2).rotateX(-Math.PI / 2);
+  const beam = new THREE.Mesh(carShared.beamGeo, carShared.beamMat);
   beam.scale.set(4, 1, 8);
   beam.position.set(0, 0.05, geo.L / 2 + 4.3);
   beam.renderOrder = 2;
   g.add(beam);
-  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(geo.W + 1.2, geo.L + 1.2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.blob, transparent: true, depthWrite: false }));
+  const shadow = new THREE.Mesh(geo.shadowGeo, carShared.shadowMat);
   shadow.position.y = 0.03;
   shadow.renderOrder = 1;
   g.add(shadow);
@@ -238,7 +259,7 @@ export function makeCar(T, type, color, cop) {
     const stripe = new THREE.Mesh(boxGeo(geo.W + 0.04, 0.25, geo.L * 0.5), lam('#111522'));
     stripe.position.y = (type === 1 ? 0.4 : 0.4) + 0.35;
     g.add(sb, stripe);
-    const glowR = new THREE.Mesh(new THREE.PlaneGeometry(9, 9).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.glow, color: 0xff1030, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const glowR = new THREE.Mesh(carShared.glowGeo, new THREE.MeshBasicMaterial({ map: T.glow, color: 0xff1030, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
     const glowB = glowR.clone();
     glowB.material = glowR.material.clone();
     glowB.material.color.set(0x1060ff);
@@ -248,6 +269,17 @@ export function makeCar(T, type, color, cop) {
     car.siren = { red, blue, glowR, glowB, bar: sb };
   }
   return car;
+}
+
+export function disposeCar(car) {
+  car.paintMat.dispose();
+  car.tailMat.dispose();
+  if (car.siren) {
+    car.siren.red.material.dispose();
+    car.siren.blue.material.dispose();
+    car.siren.glowR.material.dispose();
+    car.siren.glowB.material.dispose();
+  }
 }
 
 export function poseCar(car, o, dt, t) {
@@ -270,8 +302,8 @@ export function poseCar(car, o, dt, t) {
   if (car.siren && !wreck) {
     const on = !!o.siren;
     const ph = Math.floor(t * 6) % 2;
-    car.siren.red.material.color.setScalar(on && ph === 0 ? 3 : 0.35).multiply(new THREE.Color(0xff1030));
-    car.siren.blue.material.color.setScalar(on && ph === 1 ? 3 : 0.35).multiply(new THREE.Color(0x1060ff));
+    car.siren.red.material.color.setScalar(on && ph === 0 ? 3 : 0.35).multiply(SIREN_R);
+    car.siren.blue.material.color.setScalar(on && ph === 1 ? 3 : 0.35).multiply(SIREN_B);
     car.siren.glowR.material.opacity = on && ph === 0 ? 0.75 : 0;
     car.siren.glowB.material.opacity = on && ph === 1 ? 0.75 : 0;
   }
@@ -280,18 +312,36 @@ export function poseCar(car, o, dt, t) {
 export function makePickup(T, kind) {
   const g = new THREE.Group();
   const tex = T.pickup[kind] || T.pickup.cash;
-  const icon = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide }));
+  if (!pickupGeo) {
+    pickupGeo = {
+      icon: new THREE.PlaneGeometry(1.8, 1.8).rotateX(-Math.PI / 2),
+      glow: new THREE.PlaneGeometry(5, 5).rotateX(-Math.PI / 2),
+      ring: new THREE.TorusGeometry(1.05, 0.08, 6, 24).rotateX(Math.PI / 2),
+    };
+  }
+  const icon = new THREE.Mesh(pickupGeo.icon, new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false, side: THREE.DoubleSide }));
   icon.position.y = 1.2;
   icon.renderOrder = 4;
   const col = new THREE.Color(tex.userData.color);
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(5, 5).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: T.glow, color: col, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const glow = new THREE.Mesh(pickupGeo.glow, new THREE.MeshBasicMaterial({ map: T.glow, color: col, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
   glow.position.y = 0.2;
   glow.renderOrder = 2;
-  const beamMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.08, 6, 24).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: col, toneMapped: false }));
+  const ring = new THREE.Mesh(pickupGeo.ring, new THREE.MeshBasicMaterial({ color: col, toneMapped: false }));
   ring.position.y = 1.2;
   g.add(glow, icon, ring);
-  return { g, icon, glow, ring, beamMat };
+  return { g, icon, glow, ring };
+}
+
+let pickupGeo = null;
+
+export function disposePickup(p) {
+  p.icon.material.dispose();
+  p.glow.material.dispose();
+  p.ring.material.dispose();
+}
+
+export function disposeHuman(h) {
+  if (h.tag) { h.tag.material.map?.dispose(); h.tag.material.dispose(); }
 }
 
 export function posePickup(p, o, t) {

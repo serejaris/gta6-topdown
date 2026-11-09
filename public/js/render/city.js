@@ -341,7 +341,6 @@ function buildProps(group, world, T, rnd, animated) {
     const hx = p.x + Math.cos(ang) * 2, hz = p.z - Math.sin(ang) * 2;
     pm.setMatrixAt(i, new THREE.Matrix4().compose(v.set(hx, 0.22, hz), q.identity(), s.set(13, 1, 13)));
   });
-  lm.castShadow = true;
   pm.renderOrder = 2;
   group.add(lm, hm, pm);
 }

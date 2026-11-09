@@ -22,7 +22,8 @@ void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC.rgb,
   pts.renderOrder = additive ? 11 : 10;
   const P = [];
   for (let i = 0; i < max; i++) P.push({ life: 0 });
-  let next = 0;
+  let next = 0, lastN = -1;
+  const c = new THREE.Color();
   return {
     pts, mat,
     spawn(x, y, z, vx, vy, vz, life, s0, s1, c0, c1, a0, a1, drag = 0, grav = 0) {
@@ -32,7 +33,6 @@ void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC.rgb,
     },
     update(dt) {
       let n = 0;
-      const c = new THREE.Color();
       for (const p of P) {
         if (p.life <= 0) continue;
         p.life -= dt;
@@ -49,6 +49,8 @@ void main(){ vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC.rgb,
         n++;
       }
       geo.setDrawRange(0, n);
+      if (n === 0 && lastN === 0) return;
+      lastN = n;
       geo.attributes.position.needsUpdate = true;
       geo.attributes.pcolor.needsUpdate = true;
       geo.attributes.psize.needsUpdate = true;
@@ -80,6 +82,7 @@ function decalPool(scene, tex, max, opts = {}) {
 const C = (h) => new THREE.Color(h);
 const FIRE0 = C('#fff2b0'), FIRE1 = C('#ff3a08'), FIRE_A = C('#ffb347'), SMOKE0 = C('#4a3a40'), SMOKE1 = C('#2a2230');
 const SPARK0 = C('#fff8d0'), SPARK1 = C('#ff9a20'), BLOOD0 = C('#b0101a'), BLOOD1 = C('#5a0008');
+const SMOKE_C0 = C('#2e2830'), SMOKE_C1 = C('#1a1620');
 
 export function createFx(scene, T) {
   const add = particleSystem(T, 2500, true);
@@ -204,7 +207,7 @@ export function createFx(scene, T) {
       let t = (smokers.get(id) || 0) - dt;
       while (t <= 0) {
         t += heavy ? 0.06 : 0.14;
-        norm.spawn(x + (R() - 0.5) * 1.5, 1.2, z + (R() - 0.5) * 1.5, (R() - 0.3) * 1.5, 2.5 + R() * 2, (R() - 0.3) * 1.5, 2.5 + R(), 1, 5, C('#2e2830'), C('#1a1620'), 0.65, 0, 0.3);
+        norm.spawn(x + (R() - 0.5) * 1.5, 1.2, z + (R() - 0.5) * 1.5, (R() - 0.3) * 1.5, 2.5 + R() * 2, (R() - 0.3) * 1.5, 2.5 + R(), 1, 5, SMOKE_C0, SMOKE_C1, 0.65, 0, 0.3);
         if (heavy && R() < 0.4) add.spawn(x + (R() - 0.5), 1, z + (R() - 0.5), 0, 2 + R() * 2, 0, 0.4, 1.6, 0.5, FIRE0, FIRE1, 0.9, 0);
       }
       smokers.set(id, t);
