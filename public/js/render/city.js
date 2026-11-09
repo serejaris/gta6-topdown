@@ -292,7 +292,7 @@ function buildProps(group, world, T, rnd, animated) {
   leaves.box(topX - 0.35, PH - 0.3, -0.35, topX + 0.35, PH + 0.3, 0.35, new THREE.Color('#6b4a2a'));
   const crownGeo = leaves.geometry();
   const trunkMesh = new THREE.InstancedMesh(trunkGeo, new THREE.MeshLambertMaterial({ color: 0x8a6a4a }), palms.length);
-  const crownMesh = new THREE.InstancedMesh(crownGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), palms.length);
+  const crownMesh = new THREE.InstancedMesh(crownGeo, patchFade(new THREE.MeshLambertMaterial({ vertexColors: true })), palms.length);
   palms.forEach((p, i) => {
     e.set(0, rnd() * Math.PI * 2, 0);
     m4.compose(v.set(p.x, 0.15, p.z), q.setFromEuler(e), s.setScalar(p.s));
@@ -310,7 +310,7 @@ function buildProps(group, world, T, rnd, animated) {
   crown.scale(1, 0.8, 1);
   crown.translate(0, 4.2, 0);
   const tm = new THREE.InstancedMesh(tTrunk, new THREE.MeshLambertMaterial({ color: 0x6b4a32 }), trees.length);
-  const cm = new THREE.InstancedMesh(crown, new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true }), trees.length);
+  const cm = new THREE.InstancedMesh(crown, patchFade(new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true })), trees.length);
   trees.forEach((p, i) => {
     e.set(0, rnd() * 6, 0);
     m4.compose(v.set(p.x, 0.15, p.z), q.setFromEuler(e), s.setScalar(p.s));
