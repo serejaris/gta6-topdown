@@ -25,6 +25,7 @@ const RAM_DMG = 10;
 const HIT_CREDIT_T = 5;
 const TEMP_PED_T = 30;
 const STILL_T = 2;
+const COP_LEAVE_T = 10;
 
 const rand = Math.random;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -141,7 +142,7 @@ export function createSim(broadcast, send = () => {}) {
       hp: T.hp, driver: 'npc', cop: !!opts.cop, siren: !!opts.cop, wreck: false,
       i: 0, j: 0, dx: 1, dz: 0, ex: 1, ez: 0, lane: LANE_IN,
       cruise: opts.cop ? 24 : 8 + rand() * 5, panicUntil: 0, stuckT: 0, ghostUntil: 0,
-      burning: false, burnAt: 0, lastHitBy: null, lastHitAt: 0, ramCd: 0, laneAt: -10, movedAt: now, wreckAt: 0, target: opts.target ?? null, idleSince: now, ram: false,
+      burning: false, burnAt: 0, lastHitBy: null, lastHitAt: 0, ramCd: 0, reverseUntil: 0, chkAt: now, chkX: 0, chkZ: 0, laneAt: -10, movedAt: now, wreckAt: 0, target: opts.target ?? null, idleSince: now, ram: false,
     };
     return car;
   }
@@ -689,7 +690,17 @@ export function createSim(broadcast, send = () => {}) {
     let targetSpeed;
     let segS = null, segC = 0;
     const tdist = tgt ? dist(tgt.x, tgt.z, car.x, car.z) : Infinity;
-    if (tgt && tdist < 28) {
+    const clearShot = tgt && tdist < 28 && raycast(world, car.x, car.z, (tgt.x - car.x) / (tdist || 1), (tgt.z - car.z) / (tdist || 1), tdist) >= tdist - 1.5;
+    if (now < car.reverseUntil) {
+      car.v = Math.max(-5, car.v - 12 * dt);
+      car.x += Math.sin(car.a) * car.v * dt;
+      car.z += Math.cos(car.a) * car.v * dt;
+      const rs = collideCircle(world, car.x, car.z, 1.2);
+      if (rs.hit) { car.x = rs.x; car.z = rs.z; }
+      if (now + dt >= car.reverseUntil) { car.ram = false; car.v = 0; snapToGrid(car); }
+      return;
+    }
+    if (clearShot) {
       car.ram = true;
       desired = Math.atan2(tgt.x - car.x, tgt.z - car.z);
       const ramming = tgt.car != null && level(tgt) >= RAM_LEVEL && now >= car.ramCd;
@@ -785,9 +796,15 @@ export function createSim(broadcast, send = () => {}) {
     else car.v = Math.max(targetSpeed, car.v - 16 * dt);
     car.x += Math.sin(car.a) * car.v * dt;
     car.z += Math.cos(car.a) * car.v * dt;
-    if (car.ram) {
-      const res = collideCircle(world, car.x, car.z, 1.2);
-      if (res.hit) { car.x = res.x; car.z = res.z; car.v *= 0.6; }
+    let wallHit = false;
+    for (const [cx, cz, cr] of carCircles(car)) {
+      const res = collideCircle(world, cx, cz, cr);
+      if (res.hit) { car.x += res.x - cx; car.z += res.z - cz; wallHit = true; }
+    }
+    if (wallHit) car.v *= 0.6;
+    if (now - car.chkAt > 1.5) {
+      if ((car.ram || car.cop || wallHit) && targetSpeed > 2 && dist(car.x, car.z, car.chkX, car.chkZ) < 1) car.reverseUntil = now + 1.2;
+      car.chkAt = now; car.chkX = car.x; car.chkZ = car.z;
     }
     if (car.v < 0.5) {
       car.stuckT += dt;
@@ -968,7 +985,21 @@ export function createSim(broadcast, send = () => {}) {
     for (const cop of cops) {
       if (cop.dead) continue;
       const tgt = cop.target != null ? players.get(cop.target) : null;
-      if (!tgt || tgt.dead || level(tgt) === 0) { cop.v = 0; continue; }
+      if (!tgt || tgt.dead || level(tgt) === 0) {
+        if (!cop.lostAt) {
+          cop.lostAt = now;
+          let near = null, nd = Infinity;
+          for (const q of players.values()) { const dd = dist2(q.x, q.z, cop.x, cop.z); if (dd < nd) { nd = dd; near = q; } }
+          cop.a = near ? Math.atan2(cop.x - near.x, cop.z - near.z) : rand() * Math.PI * 2;
+        }
+        const x = cop.x + Math.sin(cop.a) * 2.5 * dt, z = cop.z + Math.cos(cop.a) * 2.5 * dt;
+        const res = collideCircle(world, x, z, 0.45);
+        if (res.hit) cop.a += (rand() < 0.5 ? 1 : -1) * Math.PI / 2;
+        cop.x = clamp(res.x, 1, S - 1); cop.z = clamp(res.z, 1, S - 1);
+        cop.v = 2.5;
+        continue;
+      }
+      cop.lostAt = 0;
       const d = dist(cop.x, cop.z, tgt.x, tgt.z);
       const lv = level(tgt);
       let speed = d > 1.1 ? 5.2 : 0;
@@ -980,7 +1011,8 @@ export function createSim(broadcast, send = () => {}) {
         const res = collideCircle(world, x, z, 0.45);
         if (res.hit && Math.abs(res.x - x) + Math.abs(res.z - z) > 0) {
           const tx = -res.nz, tz = res.nx;
-          const sgn = tx * nx + tz * nz >= 0 ? 1 : -1;
+          if (!cop.slideSgn || now > cop.slideUntil) { cop.slideSgn = tx * nx + tz * nz >= 0 ? 1 : -1; cop.slideUntil = now + 1.5; }
+          const sgn = cop.slideSgn;
           x = res.x + tx * sgn * speed * dt * 0.8;
           z = res.z + tz * sgn * speed * dt * 0.8;
         } else { x = res.x; z = res.z; }
@@ -988,6 +1020,10 @@ export function createSim(broadcast, send = () => {}) {
       }
       cop.a = Math.atan2(tgt.x - cop.x, tgt.z - cop.z);
       cop.v = speed;
+      if (!cop.chkAt || now - cop.chkAt > 3) {
+        cop.stuck = speed > 0 && d > 3 && cop.chkAt && dist(cop.x, cop.z, cop.chkX, cop.chkZ) < 1.5;
+        cop.chkAt = now; cop.chkX = cop.x; cop.chkZ = cop.z;
+      }
       if (tgt.car == null && d < 1.6) { bust(tgt); continue; }
       if (lv >= 3 && d < 25 && now - cop.lastShot > 1.3) {
         const ang = Math.atan2(tgt.x - cop.x, tgt.z - cop.z) + (rand() * 2 - 1) * 0.08;
@@ -1014,17 +1050,26 @@ export function createSim(broadcast, send = () => {}) {
       if (c.dead && now - c.deadAt > 15) { cops.splice(k, 1); continue; }
       if (c.dead) continue;
       const tgt = c.target != null ? players.get(c.target) : null;
-      if ((!tgt || tgt.dead || level(tgt) === 0) && farFromPlayers(c.x, c.z, 40)) { cops.splice(k, 1); continue; }
+      if ((!tgt || tgt.dead || level(tgt) === 0) && (farFromPlayers(c.x, c.z, 40) || (c.lostAt && now - c.lostAt > COP_LEAVE_T))) { cops.splice(k, 1); continue; }
+      if (c.stuck) { cops.splice(k, 1); continue; }
       if (tgt && dist(c.x, c.z, tgt.x, tgt.z) > 160) cops.splice(k, 1);
     }
+  }
+
+  function sees(c, p) {
+    const d2 = dist2(c.x, c.z, p.x, p.z);
+    if (d2 >= 900) return false;
+    const d = Math.sqrt(d2);
+    if (d < 1) return true;
+    return raycast(world, c.x, c.z, (p.x - c.x) / d, (p.z - c.z) / d, d) >= d - 1;
   }
 
   function stepPolice(dt) {
     for (const p of players.values()) {
       if (p.dead || p.wanted <= 0) continue;
       let seen = false;
-      for (const c of cops) if (!c.dead && dist2(c.x, c.z, p.x, p.z) < 900) { seen = true; break; }
-      if (!seen) for (const c of cars) if (c.cop && c.driver === 'npc' && !c.wreck && dist2(c.x, c.z, p.x, p.z) < 900) { seen = true; break; }
+      for (const c of cops) if (!c.dead && c.target === p.id && sees(c, p)) { seen = true; break; }
+      if (!seen) for (const c of cars) if (c.cop && c.driver === 'npc' && !c.wreck && c.target === p.id && sees(c, p)) { seen = true; break; }
       if (seen) p.decayFrom = now;
       if (now - Math.max(p.lastCrime, p.decayFrom) >= 25) {
         p.wanted = Math.max(0, p.wanted - 1);
@@ -1108,6 +1153,7 @@ export function createSim(broadcast, send = () => {}) {
 
   return {
     world,
+    internals: { cars, peds, cops, players },
     join(name) {
       const clean = String(typeof name === 'string' ? name : '').replace(/[^\p{L}\p{N} _.\-]/gu, '').trim().slice(0, 16) || `Player${nextId}`;
       const id = nextId++;
