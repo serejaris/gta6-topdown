@@ -1137,7 +1137,7 @@ export function createSim(broadcast, send = () => {}) {
           p.money += amount;
           ev('cash', { id: p.id, amount, x: r2(pk.x), z: r2(pk.z) });
         }
-        ev('pickup', { id: pk.id, kind: pk.kind, by: p.id });
+        ev('pickup', { id: pk.id, item: pk.kind, by: p.id });
         pk.active = false;
         pk.respawnAt = now + 25;
         break;

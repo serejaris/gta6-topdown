@@ -64,7 +64,7 @@
 - `explode` `{x, z, r}`
 - `kill` `{killer, killerName, victim, victimName, how}` — `victim` может быть `null` для NPC (тогда `victimName:'pedestrian'|'cop'`).
 - `wasted` `{id}`, `busted` `{id}` — игрок убит / арестован (арест: коп пешком рядом с игроком, стоящим пешком с розыском).
-- `pickup` `{id, kind, by}`, `carjack` `{by, car}`, `cash` `{id, amount, x, z}`
+- `pickup` `{id, item, by}` (`item` — вид пикапа), `carjack` `{by, car}`, `cash` `{id, amount, x, z}`
 - `chat` `{from, name, text}`, `join` `{id, name}`, `leave` `{id, name}`
 - `frenzy` `{id, count}` — серия убийств (3+ за 6 с).
 
