@@ -658,6 +658,7 @@ export function createSim(broadcast, send = () => {}) {
 
   function handleSt(p, msg) {
     if (p.dead) return;
+    if (msg.car !== undefined && (msg.car ?? null) !== p.car) return;
     if (!fin(msg.x) || !fin(msg.z)) return;
     let x = clamp(msg.x, 0, S);
     let z = clamp(msg.z, 0, S);
