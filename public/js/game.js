@@ -3,6 +3,7 @@ import { collideCircle, isRoad, WEAPONS, CAR_TYPES } from '/shared/world.js';
 const INTERP_MIN = 0.15;
 const INTERP_MAX = 0.4;
 const EXTRAP_MAX = 0.25;
+const WEAPON_BY_PICKUP = { pistol: 1, uzi: 2, shotgun: 3, rocket: 4 };
 const SEND_RATE = 1 / 15;
 const FOOT_R = 0.45;
 const WALK = 5;
@@ -73,6 +74,8 @@ export function createGame({ world, net, bot = false }) {
   let lastAdopt = -10;
   let pendingW = null;
   let pendingWUntil = 0;
+  const owned = [true, true, false, false, false];
+  let fireQueuedUntil = 0;
   let enterSentAt = -10;
   let exitSentAt = -10;
   let snapsSinceEnter = 0;
@@ -114,6 +117,8 @@ export function createGame({ world, net, bot = false }) {
     snaps.length = 0;
     clock.off = null;
     clock.last = -1;
+    owned.fill(false, 1);
+    owned[1] = true;
     local.have = false;
     local.car = null;
     local.cs = null;
@@ -177,8 +182,11 @@ export function createGame({ world, net, bot = false }) {
     const id = net?.id ?? view.me.id;
     const srv = s.players.get(id);
     if (!srv) return;
+    if (srv.dead && !local.dead) owned.fill(false, 1);
+    if (!srv.dead && local.dead) { owned.fill(false, 1); owned[1] = true; }
     lastSrv = srv;
     local.dead = !!srv.dead;
+    trackWeapons(srv);
     snapsSinceEnter++;
 
     if (!local.have || (adoptAfter && t >= adoptAfter && !srv.dead)) {
@@ -218,10 +226,27 @@ export function createGame({ world, net, bot = false }) {
     }
   }
 
+  function trackWeapons(srv) {
+    if (Number.isInteger(srv.wm)) {
+      for (let w = 0; w < owned.length; w++) owned[w] = w === 0 || !!(srv.wm & (1 << w));
+      return;
+    }
+    if (Number.isInteger(srv.w) && srv.w > 0 && srv.ammo != null) owned[srv.w] = srv.ammo !== 0;
+    if (pendingW != null && now() >= pendingWUntil) {
+      if (srv.w !== pendingW) owned[pendingW] = pendingW === 0;
+      pendingW = null;
+    }
+  }
+
   function onEvent(ev) {
     const id = net?.id ?? view.me.id;
     if ((ev.kind === 'wasted' || ev.kind === 'busted') && ev.id === id) {
       if (respawnAt == null) respawnAt = now() + 3;
+      if (ev.kind === 'busted') owned.fill(false, 1);
+    }
+    if (ev.by === id) {
+      const w = WEAPON_BY_PICKUP[ev.kind === 'pickup' ? ev.item : ev.kind];
+      if (w != null) owned[w] = true;
     }
   }
 
@@ -305,6 +330,7 @@ export function createGame({ world, net, bot = false }) {
       handbrake: d.has('Space'),
       aimX, aimZ,
       fire: inp.mouseDown,
+      firePressed: inp.mousePressed,
       enter: inp.pressed.has('KeyF') || inp.pressed.has('Enter') || inp.pressed.has('NumpadEnter'),
       weapon,
       weaponDelta: inp.wheel,
@@ -717,8 +743,19 @@ export function createGame({ world, net, bot = false }) {
     const srvW = lastSrv?.w ?? view.me.w ?? 1;
     let curW = pendingW != null && t < pendingWUntil ? pendingW : srvW;
     let newW = null;
-    if (it.weapon != null) newW = it.weapon;
-    else if (it.weaponDelta) newW = ((curW + it.weaponDelta) % WEAPONS.length + WEAPONS.length) % WEAPONS.length;
+    const n = WEAPONS.length;
+    if (it.weapon != null) newW = owned[it.weapon] ? it.weapon : null;
+    else if (it.weaponDelta) {
+      const dir = Math.sign(it.weaponDelta);
+      let w = curW;
+      for (let k = Math.abs(it.weaponDelta); k > 0; k--) {
+        for (let j = 1; j <= n; j++) {
+          const c = ((w + dir * j) % n + n) % n;
+          if (owned[c]) { w = c; break; }
+        }
+      }
+      newW = w;
+    }
     if (newW != null && newW !== curW) {
       net?.send({ t: 'weapon', w: newW });
       pendingW = newW;
@@ -727,8 +764,11 @@ export function createGame({ world, net, bot = false }) {
     }
 
     fireCd -= dt;
-    if (it.fire && fireCd <= 0 && local.have && !local.dead) {
-      const wpn = WEAPONS[curW] || WEAPONS[1];
+    const wpn = WEAPONS[curW] || WEAPONS[1];
+    if (it.firePressed) fireQueuedUntil = t + 0.2;
+    const wantFire = bot || wpn.auto ? it.fire : t < fireQueuedUntil;
+    if (wantFire && fireCd <= 0 && local.have && !local.dead) {
+      fireQueuedUntil = 0;
       const ammo = lastSrv?.ammo;
       if (curW === 0 || ammo == null || ammo > 0) {
         const a = Math.atan2(aimX - local.x, aimZ - local.z);
