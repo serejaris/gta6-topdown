@@ -109,7 +109,7 @@ export function createRenderer(canvas, world) {
       if (e.stamp !== stamp) {
         scene.remove(e.g);
         map.delete(id);
-        if (dispose) dispose(e);
+        if (dispose) dispose(e, id);
       }
     }
   }
@@ -217,13 +217,16 @@ export function createRenderer(canvas, world) {
         }
       }
       c.px = o.x; c.pz = o.z;
-    }, dt, t, disposeCar);
+    }, dt, t, (c, id) => { disposeCar(c); fx.forget(id); });
 
     sync(pickups, view.pickups, (o) => makePickup(T, o.kind), (p, o) => posePickup(p, o, t), dt, t, disposePickup);
 
     const myColor = (view.players || []).find((p) => p.id === me.id)?.color || '#3cffd0';
     if (!marker || markerColor !== myColor) {
-      if (marker) scene.remove(marker);
+      if (marker) {
+        scene.remove(marker);
+        marker.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      }
       marker = makeMarker(myColor);
       markerColor = myColor;
       scene.add(marker);

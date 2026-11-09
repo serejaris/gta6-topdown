@@ -203,6 +203,7 @@ export function createFx(scene, T) {
       else if (ev.kind === 'explode') explode(ev);
       else if (ev.kind === 'cash') cash(ev);
     },
+    forget(id) { smokers.delete(id); },
     smoke(id, x, z, dt, heavy) {
       let t = (smokers.get(id) || 0) - dt;
       while (t <= 0) {
