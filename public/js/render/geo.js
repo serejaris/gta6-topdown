@@ -71,7 +71,7 @@ vec3 sg = uTarget - uCam;
 float ft = clamp(dot(vFadeW - uCam, sg) / dot(sg, sg), 0.0, 1.0);
 float fd = length(vFadeW - (uCam + sg * ft));
 float fade = (1.0 - smoothstep(uFadeR * 0.55, uFadeR, fd)) * step(1.6, vFadeW.y);
-fade = max(fade, smoothstep(uCam.y - 18.0, uCam.y - 6.0, vFadeW.y));
+fade = max(fade, smoothstep(uCam.y - 7.0, uCam.y - 2.0, vFadeW.y));
 vec2 fc = floor(mod(gl_FragCoord.xy, 4.0));
 float bayer = mod(fc.x * 2.0 + fc.y * 3.0 + fc.x * fc.y, 4.0) / 4.0 + mod(fc.x + fc.y * 2.0, 4.0) / 16.0;
 if (fade * 0.85 > bayer) discard;

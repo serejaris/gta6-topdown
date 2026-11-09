@@ -3,7 +3,7 @@ import { CAR_TYPES } from '/shared/world.js';
 import { Builder } from './geo.js';
 import { textSprite } from './textures.js';
 
-const HS = 1.6;
+const HS = 1.9;
 let carShared = null;
 const SHIRTS =['#e63946', '#f4a261', '#2a9d8f', '#e9c46a', '#8338ec', '#ff70a6'];
 const PANTS = ['#264653', '#3d405b', '#6b705c', '#1d3557', '#5c4033', '#2b2d42'];
@@ -17,9 +17,13 @@ function boxGeo(w, h, d, y = 0) {
 }
 const headGeo = new THREE.SphereGeometry(0.19, 8, 6);
 const matCache = {};
-function lam(hex) {
-  if (!matCache[hex]) matCache[hex] = new THREE.MeshLambertMaterial({ color: hex });
-  return matCache[hex];
+function lam(hex, glow = 0) {
+  const k = glow ? `${hex}|${glow}` : hex;
+  if (!matCache[k]) {
+    matCache[k] = new THREE.MeshLambertMaterial({ color: hex });
+    if (glow) matCache[k].emissive.set(hex).multiplyScalar(glow);
+  }
+  return matCache[k];
 }
 
 let humanShared = null;
@@ -28,8 +32,9 @@ export function makeHuman(T, opts) {
   const g = new THREE.Group();
   const body = new THREE.Group();
   g.add(body);
-  body.scale.setScalar(HS);
-  const shirt = lam(opts.shirt), pants = lam(opts.pants), skin = lam(opts.skin);
+  body.scale.setScalar(opts.player ? HS * 1.1 : HS);
+  const glow = opts.player ? 0.45 : 0;
+  const shirt = lam(opts.shirt, glow), pants = lam(opts.pants), skin = lam(opts.skin, glow * 0.5);
   const legL = new THREE.Group(), legR = new THREE.Group();
   legL.position.set(-0.11, 0.85, 0);
   legR.position.set(0.11, 0.85, 0);
@@ -39,7 +44,7 @@ export function makeHuman(T, opts) {
   const shoulders = new THREE.Mesh(boxGeo(0.56, 0.14, 0.3, 1.4), shirt);
   const head = new THREE.Mesh(headGeo, skin);
   head.position.y = 1.65;
-  const hair = new THREE.Mesh(boxGeo(0.3, 0.1, 0.32, 1.8), lam(opts.hair || '#2b1d14'));
+  const hair = new THREE.Mesh(boxGeo(0.3, 0.1, 0.32, 1.8), lam(opts.hair || '#2b1d14', glow * 0.5));
   const armL = new THREE.Group(), armR = new THREE.Group();
   armL.position.set(-0.32, 1.42, 0);
   armR.position.set(0.32, 1.42, 0);

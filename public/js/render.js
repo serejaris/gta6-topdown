@@ -6,27 +6,28 @@ import { createFx } from './render/fx.js';
 import { makeHuman, poseHuman, pedLook, makeNameTag, makeMarker, makeCar, poseCar, makePickup, posePickup, disposeCar, disposePickup, disposeHuman } from './render/actors.js';
 import { createQuality } from './render/quality.js';
 
-const FOG = 0x6a3a78;
+const FOG = 0x3b3442;
 
 export function createRenderer(canvas, world) {
   const params = new URLSearchParams(location.search);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = !params.has('noshadow');
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(FOG);
-  scene.fog = new THREE.Fog(0xb0507e, 60, 260);
+  scene.fog = new THREE.Fog(0x6c5a6a, 60, 260);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 1, 900);
   camera.up.set(0, 0, -1);
 
-  const hemi = new THREE.HemisphereLight(0xffa6d8, 0x4a2a5a, 1.25);
+  const hemi = new THREE.HemisphereLight(0xcfc2c8, 0x3a3444, 1.3);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffb070, 2.3);
+  const sun = new THREE.DirectionalLight(0xffcf98, 2.1);
+  sun.shadow.intensity = 0.8;
   const sunDir = new THREE.Vector3(-0.7, 0.75, 0.35).normalize();
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -35,9 +36,25 @@ export function createRenderer(canvas, world) {
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
-  const rim = new THREE.DirectionalLight(0x6a8cff, 0.45);
+  const rim = new THREE.DirectionalLight(0x7a8cc0, 0.4);
   rim.position.set(1, 1, -0.6);
   scene.add(rim);
+
+  if (!params.has('novignette')) {
+    const nc = document.createElement('canvas');
+    nc.width = nc.height = 128;
+    const ng = nc.getContext('2d');
+    const nd = ng.createImageData(128, 128);
+    for (let i = 0; i < nd.data.length; i += 4) {
+      const v = Math.random() < 0.5 ? 0 : 255;
+      nd.data[i] = nd.data[i + 1] = nd.data[i + 2] = v;
+      nd.data[i + 3] = 6 + Math.random() * 10;
+    }
+    ng.putImageData(nd, 0, 0);
+    const vg = document.createElement('div');
+    vg.style.cssText = `position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 75% 70% at 50% 50%,rgba(12,8,18,0) 55%,rgba(12,8,18,.5) 100%),url(${nc.toDataURL()})`;
+    canvas.after(vg);
+  }
 
   const T = makeTextures();
   T.road.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -59,7 +76,7 @@ export function createRenderer(canvas, world) {
       const comp = new a.EffectComposer(renderer);
       comp.addPass(new b.RenderPass(scene, camera));
       const sz = renderer.getDrawingBufferSize(new THREE.Vector2());
-      const bloom = new c.UnrealBloomPass(new THREE.Vector2(sz.x / 2, sz.y / 2), 0.55, 0.45, 0.82);
+      const bloom = new c.UnrealBloomPass(new THREE.Vector2(sz.x / 2, sz.y / 2), 0.42, 0.2, 0.9);
       const bloomSetSize = bloom.setSize.bind(bloom);
       bloom.setSize = (w, h) => bloomSetSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
       comp.addPass(bloom);
@@ -109,7 +126,7 @@ export function createRenderer(canvas, world) {
       if (e.stamp !== stamp) {
         scene.remove(e.g);
         map.delete(id);
-        if (dispose) dispose(e);
+        if (dispose) dispose(e, id);
       }
     }
   }
@@ -135,9 +152,9 @@ export function createRenderer(canvas, world) {
     }
     const lead = me.car != null ? Math.min(v, 40) * 0.35 : 0;
     const lx = Math.sin(a) * lead, lz = Math.cos(a) * lead;
-    let hh = me.car != null ? 45 + Math.min(1, v / 36) * 30 : 38;
-    const tall = city.maxHeightNear(tx, tz, 26);
-    hh = Math.max(hh, tall + 22);
+    let hh = me.car != null ? 32 + Math.min(1, v / 30) * 18 : 30;
+    const tall = city.maxHeightNear(tx, tz, 14);
+    hh = Math.max(hh, Math.min(tall + 6, hh + 14));
     if (!cam.init) { cam.ox = lx; cam.oz = lz; cam.h = hh; cam.init = true; }
     const k = 1 - Math.exp(-dt * 4);
     cam.ox += (lx - cam.ox) * k;
@@ -151,7 +168,7 @@ export function createRenderer(canvas, world) {
     camera.lookAt(cam.x + sx, 0, cam.z + sz);
     fadeUniforms.uCam.value.copy(camera.position);
     fadeUniforms.uTarget.value.set(tx, 1.2, tz);
-    fadeUniforms.uFadeR.value = me.car != null ? 9 : 6.5;
+    fadeUniforms.uFadeR.value = me.car != null ? 7 : 4.5;
     scene.fog.near = cam.h + 10;
     scene.fog.far = cam.h + 220;
     const snap = 160 / sun.shadow.mapSize.x;
@@ -176,7 +193,7 @@ export function createRenderer(canvas, world) {
     sync(peds, view.peds, makePed, posePed, dt, t);
 
     sync(players, view.players, (o) => {
-      const h = makeHuman(T, { shirt: o.color || '#ffcc00', pants: '#1d2433', skin: '#e0ac69', hair: '#1b1410' });
+      const h = makeHuman(T, { shirt: o.color || '#ffcc00', pants: '#1d2433', skin: '#f1c27d', hair: '#f4dfb4', player: true });
       h.tag = makeNameTag(o.name || 'player', o.color);
       h.g.add(h.tag);
       return h;
@@ -194,6 +211,9 @@ export function createRenderer(canvas, world) {
       }
       const off = inCar ? 3.4 : 2.2, ra = h.g.rotation.y;
       h.tag.position.set(Math.sin(ra) * off, 4,-Math.cos(ra) * off);
+      h.tag.visible = !isMe;
+      const ts = 1.1 * cam.h / 30;
+      h.tag.scale.set(ts * h.tag.userData.aspect, ts, 1);
     }, dt, t, disposeHuman);
 
     sync(cars, view.cars, (o) => makeCar(T, o.type | 0, o.color, !!o.cop || o.type === 4), (c, o, d) => {
@@ -214,13 +234,16 @@ export function createRenderer(canvas, world) {
         }
       }
       c.px = o.x; c.pz = o.z;
-    }, dt, t, disposeCar);
+    }, dt, t, (c, id) => { disposeCar(c); fx.forget(id); });
 
     sync(pickups, view.pickups, (o) => makePickup(T, o.kind), (p, o) => posePickup(p, o, t), dt, t, disposePickup);
 
     const myColor = (view.players || []).find((p) => p.id === me.id)?.color || '#3cffd0';
     if (!marker || markerColor !== myColor) {
-      if (marker) scene.remove(marker);
+      if (marker) {
+        scene.remove(marker);
+        marker.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+      }
       marker = makeMarker(myColor);
       markerColor = myColor;
       scene.add(marker);
@@ -254,9 +277,14 @@ export function createRenderer(canvas, world) {
 
   window.addEventListener('resize', resize);
 
+  function resetCamera() {
+    cam.init = false;
+  }
+
   return {
     update,
     resize,
+    resetCamera,
     effect: (ev) => fx.effect(ev),
     screenToGround,
     camera,
