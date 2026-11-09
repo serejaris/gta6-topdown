@@ -19,6 +19,10 @@ const FOOT_MAX_V = 12;
 const BUDGET_WINDOW = 1;
 const MOVE_SLACK = 2;
 const ENTER_DIST = 4.5;
+const RAM_LEVEL = 3;
+const RAM_CD = 4;
+const RAM_DMG = 10;
+const HIT_CREDIT_T = 5;
 
 const rand = Math.random;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -135,7 +139,7 @@ export function createSim(broadcast, send = () => {}) {
       hp: T.hp, driver: 'npc', cop: !!opts.cop, siren: !!opts.cop, wreck: false,
       i: 0, j: 0, dx: 1, dz: 0, ex: 1, ez: 0, lane: LANE_IN,
       cruise: opts.cop ? 24 : 8 + rand() * 5, panicUntil: 0, stuckT: 0, ghostUntil: 0,
-      burning: false, burnAt: 0, lastHitBy: null, wreckAt: 0, target: opts.target ?? null, idleSince: now, ram: false,
+      burning: false, burnAt: 0, lastHitBy: null, lastHitAt: 0, ramCd: 0, wreckAt: 0, target: opts.target ?? null, idleSince: now, ram: false,
     };
     return car;
   }
@@ -421,7 +425,7 @@ export function createSim(broadcast, send = () => {}) {
 
   function damageCar(car, dmg, by) {
     if (car.wreck) return;
-    if (by) car.lastHitBy = by.id;
+    if (by) { car.lastHitBy = by.id; car.lastHitAt = now; }
     if (car.driver === 'npc' && !car.cop) car.panicUntil = now + 10;
     car.hp -= dmg;
     if (car.hp <= 0 && !car.burning) {
@@ -464,6 +468,7 @@ export function createSim(broadcast, send = () => {}) {
     car.siren = false;
     car.wreckAt = now;
     car.target = null;
+    if (now - car.lastHitAt > HIT_CREDIT_T) car.lastHitBy = null;
     const by = car.lastHitBy != null ? players.get(car.lastHitBy) || null : null;
     if (typeof car.driver === 'number') {
       const p = players.get(car.driver);
@@ -681,7 +686,8 @@ export function createSim(broadcast, send = () => {}) {
     if (tgt && tdist < 28) {
       car.ram = true;
       desired = Math.atan2(tgt.x - car.x, tgt.z - car.z);
-      targetSpeed = tgt.car != null ? 26 : clamp((tdist - 7) * 1.5, 0, 22);
+      const ramming = tgt.car != null && level(tgt) >= RAM_LEVEL && now >= car.ramCd;
+      targetSpeed = ramming ? 26 : clamp((tdist - (tgt.car != null ? 9 : 7)) * 1.5, 0, 22);
       if (tgt.car == null && tdist < 12 && car.v < 3 && !car.dropped) {
         car.dropped = true;
         const fx0 = Math.sin(car.a), fz0 = Math.cos(car.a);
@@ -823,8 +829,12 @@ export function createSim(broadcast, send = () => {}) {
             const dmg = (impact - 7) * 2.2;
             const byA = aP ? players.get(A.driver) : null;
             const byB = bP ? players.get(B.driver) : null;
-            damageCar(A, dmg, byB);
-            damageCar(B, dmg, byA);
+            const aRam = A.ram && A.cop && bP;
+            const bRam = B.ram && B.cop && aP;
+            if (aRam) A.ramCd = now + RAM_CD;
+            if (bRam) B.ramCd = now + RAM_CD;
+            damageCar(A, bRam ? Math.min(dmg, RAM_DMG) : dmg, aRam ? null : byB);
+            damageCar(B, aRam ? Math.min(dmg, RAM_DMG) : dmg, bRam ? null : byA);
             if (A.ram) A.v *= 0.3;
             if (B.ram) B.v *= 0.3;
             if (!aP && !A.wreck) A.v *= 0.4;
