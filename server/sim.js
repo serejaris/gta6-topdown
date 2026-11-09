@@ -1329,7 +1329,7 @@ export function createSim(broadcast, send = () => {}) {
         pl.push({
           id: p.id, name: p.name, x: r2(p.x), z: r2(p.z), a: r2(p.a), v: r2(p.v), hp: Math.max(0, Math.round(p.hp)), armor: Math.round(p.armor),
           car: p.car, w: p.w, ammo: p.w === 0 ? -1 : p.ammo[p.w], money: p.money, wanted: level(p), kills: p.kills, deaths: p.deaths,
-          dead: p.dead, color: p.color,
+          dead: p.dead, color: p.color, wm: p.ammo.reduce((m, n, w) => (w === 0 || n > 0 ? m | (1 << w) : m), 0),
         });
       }
       const cs = cars.map((c) => ({
