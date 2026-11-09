@@ -1,6 +1,9 @@
 import { collideCircle, isRoad, WEAPONS, CAR_TYPES } from '/shared/world.js';
 
-const INTERP_DELAY = 0.12;
+const INTERP_MIN = 0.15;
+const INTERP_MAX = 0.4;
+const EXTRAP_MAX = 0.25;
+const WEAPON_BY_PICKUP = { pistol: 1, uzi: 2, shotgun: 3, rocket: 4 };
 const SEND_RATE = 1 / 15;
 const FOOT_R = 0.45;
 const WALK = 5;
@@ -19,15 +22,31 @@ function toMap(arr) {
   return m;
 }
 
-function interpList(m0, m1, t) {
+function interpList(m0, m1, t, gap = 0.1) {
   const out = [];
   for (const [id, b] of m1) {
     const a = m0 && m0.get(id);
-    if (!a) { out.push({ ...b }); continue; }
+    if (!a || Math.hypot(b.x - a.x, b.z - a.z) > 15 + Math.abs(b.v || 0) * gap * 1.5) { out.push({ ...b }); continue; }
     const o = { ...b };
     o.x = lerp(a.x, b.x, t);
     o.z = lerp(a.z, b.z, t);
     if (typeof a.a === 'number' && typeof b.a === 'number') o.a = a.a + wrapAngle(b.a - a.a) * t;
+    out.push(o);
+  }
+  return out;
+}
+
+function extrapList(m0, m1, gap, ext) {
+  const out = [];
+  for (const [id, b] of m1) {
+    const o = { ...b };
+    const a = m0 && m0.get(id);
+    if (!b.dead && !b.wreck) {
+      let vx, vz;
+      if (a && gap > 0.01) { vx = (b.x - a.x) / gap; vz = (b.z - a.z) / gap; }
+      else { vx = (b.v || 0) * Math.sin(b.a || 0); vz = (b.v || 0) * Math.cos(b.a || 0); }
+      if (Math.hypot(vx, vz) < 70) { o.x = b.x + vx * ext; o.z = b.z + vz * ext; }
+    }
     out.push(o);
   }
   return out;
@@ -55,9 +74,16 @@ export function createGame({ world, net, bot = false }) {
   let lastAdopt = -10;
   let pendingW = null;
   let pendingWUntil = 0;
+  const owned = [true, true, false, false, false];
+  let fireQueuedUntil = 0;
+  let touchFiring = false;
   let enterSentAt = -10;
+  let exitSentAt = -10;
+  let snapsSinceEnter = 0;
+  let exitedCar = null;
   let lastSrv = null;
   let basis = { ux: 0, uz: -1, rx: 1, rz: 0, leftSign: 1, t: -1 };
+  const clock = { off: null, jitter: 0.02, gap: 0.1, delay: 0.2, last: -1 };
 
   const local = {
     have: false,
@@ -90,6 +116,10 @@ export function createGame({ world, net, bot = false }) {
 
   function onWelcome(msg) {
     snaps.length = 0;
+    clock.off = null;
+    clock.last = -1;
+    owned.fill(false, 1);
+    owned[1] = true;
     local.have = false;
     local.car = null;
     local.cs = null;
@@ -98,6 +128,9 @@ export function createGame({ world, net, bot = false }) {
   }
 
   function adoptServerPose(srv) {
+    if (local.have && Math.hypot(srv.x - local.x, srv.z - local.z) > 60) {
+      try { renderer?.resetCamera?.(); } catch {}
+    }
     local.x = srv.x;
     local.z = srv.z;
     local.a = srv.a || 0;
@@ -116,10 +149,30 @@ export function createGame({ world, net, bot = false }) {
     local.car = car.id;
   }
 
+  function srvClock(t, st) {
+    if (clock.last >= 0 && (st < clock.last - 1 || st > clock.last + 30)) { snaps.length = 0; clock.off = null; clock.last = -1; }
+    if (clock.last >= 0 && st > clock.last) clock.gap += (clamp(st - clock.last, 0.02, 0.5) - clock.gap) * 0.1;
+    clock.last = Math.max(clock.last, st);
+    const sample = t - st;
+    if (clock.off == null || sample < clock.off) clock.off = sample;
+    else clock.off += (sample - clock.off) * 0.005;
+    const late = sample - clock.off;
+    clock.jitter += (late - clock.jitter) * (late > clock.jitter ? 0.25 : 0.02);
+  }
+
+  function renderTime(dt) {
+    const want = clamp(clock.gap + clock.jitter * 1.5 + 0.04, INTERP_MIN, INTERP_MAX);
+    clock.delay += (want - clock.delay) * Math.min(1, dt * (want > clock.delay ? 4 : 0.5));
+    return now() - (clock.off ?? 0) - clock.delay;
+  }
+
   function onSnap(msg) {
     const t = now();
+    const st = Number.isFinite(msg.time) ? msg.time : t;
+    srvClock(t, st);
+    if (snaps.length && st <= snaps[snaps.length - 1].t) return;
     const s = {
-      t,
+      t: st,
       players: toMap(msg.players),
       cars: toMap(msg.cars),
       peds: toMap(msg.peds),
@@ -130,8 +183,12 @@ export function createGame({ world, net, bot = false }) {
     const id = net?.id ?? view.me.id;
     const srv = s.players.get(id);
     if (!srv) return;
+    if (srv.dead && !local.dead) owned.fill(false, 1);
+    if (!srv.dead && local.dead) { owned.fill(false, 1); owned[1] = true; }
     lastSrv = srv;
     local.dead = !!srv.dead;
+    trackWeapons(srv);
+    snapsSinceEnter++;
 
     if (!local.have || (adoptAfter && t >= adoptAfter && !srv.dead)) {
       adoptServerPose(srv);
@@ -145,7 +202,11 @@ export function createGame({ world, net, bot = false }) {
       return;
     }
 
+    const exiting = t - exitSentAt < 1;
+    if (srv.car == null) exitSentAt = -10;
+    if (srv.car != null) enterSentAt = -10;
     if (srv.car != null && local.car !== srv.car) {
+      if (exiting && exitedCar && exitedCar.id === srv.car) return;
       const car = s.cars.get(srv.car);
       if (car) initCarState(car);
     } else if (srv.car == null && local.car != null) {
@@ -166,10 +227,27 @@ export function createGame({ world, net, bot = false }) {
     }
   }
 
+  function trackWeapons(srv) {
+    if (Number.isInteger(srv.wm)) {
+      for (let w = 0; w < owned.length; w++) owned[w] = w === 0 || !!(srv.wm & (1 << w));
+      return;
+    }
+    if (Number.isInteger(srv.w) && srv.w > 0 && srv.ammo != null) owned[srv.w] = srv.ammo !== 0;
+    if (pendingW != null && now() >= pendingWUntil) {
+      if (srv.w !== pendingW) owned[pendingW] = pendingW === 0;
+      pendingW = null;
+    }
+  }
+
   function onEvent(ev) {
     const id = net?.id ?? view.me.id;
     if ((ev.kind === 'wasted' || ev.kind === 'busted') && ev.id === id) {
       if (respawnAt == null) respawnAt = now() + 3;
+      if (ev.kind === 'busted') owned.fill(false, 1);
+    }
+    if (ev.by === id) {
+      const w = WEAPON_BY_PICKUP[ev.kind === 'pickup' ? ev.item : ev.kind];
+      if (w != null) owned[w] = true;
     }
   }
 
@@ -193,14 +271,23 @@ export function createGame({ world, net, bot = false }) {
     } catch {}
   }
 
-  function interpolate() {
+  function interpolate(dt) {
     if (!snaps.length) return null;
-    const rt = now() - INTERP_DELAY;
+    const rt = renderTime(dt);
     let s0 = snaps[0], s1 = snaps[0];
+    const last = snaps[snaps.length - 1];
     if (rt <= snaps[0].t) {
       s0 = s1 = snaps[0];
-    } else if (rt >= snaps[snaps.length - 1].t) {
-      s0 = s1 = snaps[snaps.length - 1];
+    } else if (rt >= last.t) {
+      const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+      const gap = prev ? last.t - prev.t : 0;
+      const ext = Math.min(rt - last.t, EXTRAP_MAX);
+      return {
+        players: extrapList(prev?.players, last.players, gap, ext),
+        cars: extrapList(prev?.cars, last.cars, gap, ext),
+        peds: extrapList(prev?.peds, last.peds, gap, ext),
+        pickups: last.pickups,
+      };
     } else {
       for (let i = 0; i < snaps.length - 1; i++) {
         if (snaps[i].t <= rt && rt < snaps[i + 1].t) { s0 = snaps[i]; s1 = snaps[i + 1]; break; }
@@ -208,14 +295,49 @@ export function createGame({ world, net, bot = false }) {
     }
     const k = s1.t > s0.t ? clamp((rt - s0.t) / (s1.t - s0.t), 0, 1) : 1;
     return {
-      players: interpList(s0.players, s1.players, k),
-      cars: interpList(s0.cars, s1.cars, k),
-      peds: interpList(s0.peds, s1.peds, k),
+      players: interpList(s0.players, s1.players, k, s1.t - s0.t),
+      cars: interpList(s0.cars, s1.cars, k, s1.t - s0.t),
+      peds: interpList(s0.peds, s1.peds, k, s1.t - s0.t),
       pickups: snaps[snaps.length - 1].pickups,
     };
   }
 
+  function touchIntent(inp, tc) {
+    const dead = (v) => (Math.abs(v) < 0.15 ? 0 : v);
+    const my = -dead(tc.my), mx = dead(tc.mx);
+    let moveX = basis.ux * my + basis.rx * mx;
+    let moveZ = basis.uz * my + basis.rz * mx;
+    const ml = Math.hypot(moveX, moveZ);
+    if (ml > 1) { moveX /= ml; moveZ /= ml; }
+    let aimX = null, aimZ = null;
+    if (tc.aiming) {
+      const ay = -tc.ay, ax = tc.ax;
+      let dx = basis.ux * ay + basis.rx * ax, dz = basis.uz * ay + basis.rz * ax;
+      const l = Math.hypot(dx, dz) || 1;
+      aimX = local.x + dx / l * 12;
+      aimZ = local.z + dz / l * 12;
+    }
+    return {
+      moveX, moveZ,
+      run: ml > 0.85,
+      throttle: Math.abs(my) > 0.25 ? Math.sign(my) : 0,
+      turn: clamp(-mx * 1.4, -1, 1) * basis.leftSign,
+      handbrake: false,
+      aimX, aimZ,
+      fire: tc.fire,
+      firePressed: tc.firePressed || (tc.fire && !touchFiring),
+      enter: inp.pressed.has('KeyF'),
+      weapon: null,
+      weaponDelta: inp.wheel,
+    };
+  }
+
   function humanIntent(inp) {
+    if (inp.touch?.active) {
+      const it = touchIntent(inp, inp.touch);
+      touchFiring = inp.touch.fire;
+      return it;
+    }
     const d = inp.down;
     const up = d.has('KeyW') || d.has('ArrowUp');
     const dn = d.has('KeyS') || d.has('ArrowDown');
@@ -244,6 +366,7 @@ export function createGame({ world, net, bot = false }) {
       handbrake: d.has('Space'),
       aimX, aimZ,
       fire: inp.mouseDown,
+      firePressed: inp.mousePressed,
       enter: inp.pressed.has('KeyF') || inp.pressed.has('Enter') || inp.pressed.has('NumpadEnter'),
       weapon,
       weaponDelta: inp.wheel,
@@ -364,9 +487,22 @@ export function createGame({ world, net, bot = false }) {
   function findNearCar() {
     if (local.car != null || local.dead) return null;
     let best = null, bd = ENTER_DIST * ENTER_DIST;
+    const last = snaps[snaps.length - 1];
+    const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+    const ahead = last && clock.off != null ? clamp(now() - clock.off - last.t, 0, 0.3) : 0;
     for (const c of view.cars) {
-      if (c.wreck) continue;
-      const dx = c.x - local.x, dz = c.z - local.z;
+      if (c.wreck || typeof c.driver === 'number') continue;
+      let cx = c.x, cz = c.z;
+      const sc = last?.cars.get(c.id);
+      if (sc && Math.abs(sc.v || 0) > 0.5 && !(exitedCar && exitedCar.id === c.id)) {
+        const pc = prev?.cars.get(c.id);
+        const gap = prev ? last.t - prev.t : 0;
+        let vx = (sc.v || 0) * Math.sin(sc.a || 0), vz = (sc.v || 0) * Math.cos(sc.a || 0);
+        if (pc && gap > 0.01 && Math.hypot(sc.x - pc.x, sc.z - pc.z) < 15) { vx = (sc.x - pc.x) / gap; vz = (sc.z - pc.z) / gap; }
+        cx = sc.x + vx * ahead;
+        cz = sc.z + vz * ahead;
+      }
+      const dx = cx - local.x, dz = cz - local.z;
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = c.id; }
     }
@@ -562,7 +698,7 @@ export function createGame({ world, net, bot = false }) {
     view.connected = !!net?.connected;
     updateBasis(screenW || innerWidth, screenH || innerHeight);
 
-    const ip = interpolate();
+    const ip = interpolate(dt);
     const id = net?.id ?? view.me.id;
     view.me.id = id;
     if (ip) {
@@ -597,15 +733,65 @@ export function createGame({ world, net, bot = false }) {
     view.nearCar = findNearCar();
 
     if (it.enter && local.have && !local.dead) {
-      if (local.car != null) net?.send({ t: 'exit' });
-      else if (view.nearCar != null) { net?.send({ t: 'enter', car: view.nearCar }); enterSentAt = t; }
+      if (local.car != null && local.cs) {
+        const cs = local.cs;
+        net?.send({ t: 'st', x: +cs.x.toFixed(2), z: +cs.z.toFixed(2), a: +cs.a.toFixed(3), v: +cs.vf.toFixed(2), car: cs.id });
+        net?.send({ t: 'exit' });
+        exitSentAt = t;
+        exitedCar = { id: cs.id, type: cs.type, x: cs.x, z: cs.z, a: cs.a, v: cs.vf, t };
+        const fx = Math.sin(cs.a), fz = Math.cos(cs.a);
+        const r = collideCircle(world, cs.x + fz * 2.4, cs.z - fx * 2.4, FOOT_R);
+        local.x = r.x; local.z = r.z; local.a = cs.a; local.v = 0;
+        local.car = null;
+        local.cs = null;
+        sendTimer = SEND_RATE;
+      } else if (local.car == null && view.nearCar != null && t - enterSentAt > 0.5) {
+        net?.send({ t: 'enter', car: view.nearCar });
+        enterSentAt = t;
+        snapsSinceEnter = 0;
+      }
+    }
+    if (exitedCar) {
+      const ec = exitedCar;
+      const age = t - ec.t;
+      const vc = view.cars.find((c) => c.id === ec.id);
+      if (!vc || age > 2.5 || (age > 0.8 && Math.abs(ec.v) < 0.5 && Math.hypot(vc.x - ec.x, vc.z - ec.z) < 0.15)) exitedCar = null;
+      else {
+        ec.v *= Math.exp(-3.25 * dt);
+        ec.x += Math.sin(ec.a) * ec.v * dt;
+        ec.z += Math.cos(ec.a) * ec.v * dt;
+        for (const cc of carCircles(ec)) {
+          const r = collideCircle(world, cc.x, cc.z, cc.r);
+          if (r.hit) { ec.x += r.x - cc.x; ec.z += r.z - cc.z; ec.v = 0; }
+        }
+        if (age > 0.3) {
+          const k = Math.min(1, dt * 4);
+          ec.x += (vc.x - ec.x) * k;
+          ec.z += (vc.z - ec.z) * k;
+          ec.a += wrapAngle(vc.a - ec.a) * k;
+        }
+        for (let i = 0; i < view.cars.length; i++) {
+          if (view.cars[i].id === ec.id) view.cars[i] = { ...view.cars[i], x: ec.x, z: ec.z, a: ec.a, v: ec.v, driver: null };
+        }
+      }
     }
 
     const srvW = lastSrv?.w ?? view.me.w ?? 1;
     let curW = pendingW != null && t < pendingWUntil ? pendingW : srvW;
     let newW = null;
-    if (it.weapon != null) newW = it.weapon;
-    else if (it.weaponDelta) newW = ((curW + it.weaponDelta) % WEAPONS.length + WEAPONS.length) % WEAPONS.length;
+    const n = WEAPONS.length;
+    if (it.weapon != null) newW = owned[it.weapon] ? it.weapon : null;
+    else if (it.weaponDelta) {
+      const dir = Math.sign(it.weaponDelta);
+      let w = curW;
+      for (let k = Math.abs(it.weaponDelta); k > 0; k--) {
+        for (let j = 1; j <= n; j++) {
+          const c = ((w + dir * j) % n + n) % n;
+          if (owned[c]) { w = c; break; }
+        }
+      }
+      newW = w;
+    }
     if (newW != null && newW !== curW) {
       net?.send({ t: 'weapon', w: newW });
       pendingW = newW;
@@ -614,8 +800,11 @@ export function createGame({ world, net, bot = false }) {
     }
 
     fireCd -= dt;
-    if (it.fire && fireCd <= 0 && local.have && !local.dead) {
-      const wpn = WEAPONS[curW] || WEAPONS[1];
+    const wpn = WEAPONS[curW] || WEAPONS[1];
+    if (it.firePressed) fireQueuedUntil = t + 0.2;
+    const wantFire = bot || wpn.auto ? it.fire : t < fireQueuedUntil;
+    if (wantFire && fireCd <= 0 && local.have && !local.dead) {
+      fireQueuedUntil = 0;
       const ammo = lastSrv?.ammo;
       if (curW === 0 || ammo == null || ammo > 0) {
         const a = Math.atan2(aimX - local.x, aimZ - local.z);
@@ -632,15 +821,17 @@ export function createGame({ world, net, bot = false }) {
     }
 
     sendTimer -= dt;
-    if (sendTimer <= 0 && local.have && !local.dead) {
+    const awaitingEnter = local.car == null && t - enterSentAt < 1 && snapsSinceEnter < 3;
+    if (sendTimer <= 0 && local.have && !local.dead && !awaitingEnter) {
       sendTimer = SEND_RATE;
-      net?.send({ t: 'st', x: +local.x.toFixed(2), z: +local.z.toFixed(2), a: +local.a.toFixed(3), v: +local.v.toFixed(2) });
+      net?.send({ t: 'st', x: +local.x.toFixed(2), z: +local.z.toFixed(2), a: +local.a.toFixed(3), v: +local.v.toFixed(2), car: local.car });
     }
 
     const me = view.me;
     if (lastSrv) {
       for (const k of ['hp', 'armor', 'ammo', 'money', 'wanted', 'kills', 'deaths', 'name', 'color']) if (lastSrv[k] !== undefined) me[k] = lastSrv[k];
     }
+    if (lastSrv && lastSrv.w !== curW) me.ammo = null;
     me.w = curW;
     me.dead = local.dead;
     me.car = local.car;
@@ -670,5 +861,29 @@ export function createGame({ world, net, bot = false }) {
     return view;
   }
 
-  return { view, local, setWorld, setRenderer, onWelcome, onSnap, onEvent, update, isRoad: (x, z) => isRoad(world, x, z) };
+  function onPos(msg) {
+    if (!Number.isFinite(msg.x) || !Number.isFinite(msg.z) || local.dead) return;
+    const a = Number.isFinite(msg.a) ? msg.a : local.a;
+    if ((msg.car ?? null) !== (local.car ?? null)) return;
+    if (Math.hypot(msg.x - local.x, msg.z - local.z) > 60) {
+      try { renderer?.resetCamera?.(); } catch {}
+    }
+    if (local.cs) {
+      const cs = local.cs;
+      cs.x = msg.x; cs.z = msg.z; cs.a = a; cs.vx = 0; cs.vz = 0; cs.vf = 0;
+    }
+    local.x = msg.x; local.z = msg.z; local.a = a; local.v = 0;
+    sendTimer = 0;
+    lastAdopt = now();
+  }
+
+  function keepalive() {
+    if (!net?.connected) return;
+    if (local.have && !local.dead) {
+      const x = local.cs ? local.cs.x : local.x, z = local.cs ? local.cs.z : local.z, a = local.cs ? local.cs.a : local.a;
+      net.send({ t: 'st', x: +x.toFixed(2), z: +z.toFixed(2), a: +a.toFixed(3), v: 0, car: local.car });
+    } else net.send({ t: 'ka' });
+  }
+
+  return { view, local, setWorld, setRenderer, onWelcome, onSnap, onEvent, onPos, keepalive, update, isRoad: (x, z) => isRoad(world, x, z) };
 }

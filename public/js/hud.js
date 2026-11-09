@@ -51,6 +51,8 @@ function el(tag, cls, parent, html) {
   return e;
 }
 
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -221,7 +223,9 @@ export function createHud(root, world) {
     setTimeout(() => d.classList.add('out'), 5200);
     setTimeout(() => d.remove(), 6000);
     while (feed.children.length > 6) feed.firstChild.remove();
+    return d;
   }
+  const frenzies = new Map();
 
   function showBig(kind, text, sub, dur) {
     bigKind = kind;
@@ -348,6 +352,12 @@ export function createHud(root, world) {
               <div class="sec">ЕЩЁ</div>
               <kbd>T</kbd><span>чат · Tab — таблица лидеров</span>
             </div>
+            <div class="h-keys h-touchkeys">
+              <div class="sec">С ТЕЛЕФОНА</div>
+              <kbd>ЛЕВЫЙ</kbd><span>палец слева — ходьба и руль</span>
+              <kbd>ПРАВЫЙ</kbd><span>палец справа — прицел, до упора — огонь</span>
+              <kbd>КНОПКИ</kbd><span>огонь · машина · оружие</span>
+            </div>
           </form>
         </div>`;
       const form = scr.querySelector('form');
@@ -376,9 +386,10 @@ export function createHud(root, world) {
         weaponIcon.innerHTML = WEAPON_SVG[w.id] || WEAPON_SVG[0];
       }
       set('wn', weaponName, 'textContent', w.name);
-      const ammo = w.id === 0 || me.ammo == null || me.ammo === Infinity ? '∞' : String(me.ammo);
+      const known = me.ammo != null && me.ammo >= 0;
+      const ammo = w.id === 0 || me.ammo === Infinity ? '∞' : known ? String(me.ammo) : '';
       set('am', ammoEl, 'textContent', ammo);
-      ammoEl.classList.toggle('low', w.id !== 0 && me.ammo != null && me.ammo <= Math.max(2, (w.ammo || 10) * 0.15));
+      ammoEl.classList.toggle('low', w.id !== 0 && known && me.ammo <= Math.max(2, (w.ammo || 10) * 0.15));
 
       const hp = Math.max(0, Math.min(100, me.hp ?? 100));
       const ar = Math.max(0, Math.min(100, me.armor ?? 0));
@@ -399,7 +410,7 @@ export function createHud(root, world) {
       lastMoney = target;
       const diff = target - shownMoney;
       if (Math.abs(diff) < 1) shownMoney = target;
-      else shownMoney += diff * Math.min(1, dt * 8) + Math.sign(diff) * Math.min(Math.abs(diff), 40 * dt);
+      else shownMoney += clamp(diff * Math.min(1, dt * 8) + Math.sign(diff) * Math.min(Math.abs(diff), 40 * dt), -Math.abs(diff), Math.abs(diff));
       set('mn', money, 'textContent', fmtMoney(shownMoney));
       set('st', stats, 'textContent', `KILLS ${me.kills || 0} · DEATHS ${me.deaths || 0}`);
 
@@ -467,14 +478,30 @@ export function createHud(root, world) {
           if (ev.id === meId) showBig('busted', 'BUSTED', 'минус половина денег · оружие изъято', 3.2);
           break;
         case 'frenzy':
-          if (ev.id === meId) showBig('frenzy', 'KILL FRENZY!', `серия × ${ev.count || 3}`, 2.4);
-          else {
-            const p = (view && view.players || []).find((x) => x.id === ev.id);
-            addFeed(`<span class="k">${esc(p ? p.name : 'кто-то')}</span><span class="how">KILL FRENZY ×${ev.count || 3}</span>`, false);
+          {
+            const nowT = performance.now();
+            const prev = frenzies.get(ev.id);
+            const cont = prev && nowT - prev.t < 6500;
+            const count = Math.max(ev.count || 3, cont ? prev.count : 0);
+            if (ev.id === meId) {
+              if (!cont) showBig('frenzy', 'KILL FRENZY!', `серия × ${count}`, 2.4);
+              else if (bigKind === 'frenzy' && bigTimer > 0) {
+                const sub = big.querySelector('.sub');
+                if (sub) sub.textContent = `серия × ${count}`;
+              }
+              frenzies.set(ev.id, { t: nowT, count, line: null });
+            } else {
+              const p = (view && view.players || []).find((x) => x.id === ev.id);
+              const html = `<span class="k">${esc(p ? p.name : 'кто-то')}</span><span class="how">KILL FRENZY ×${count}</span>`;
+              if (cont && prev.line && prev.line.isConnected && !prev.line.classList.contains('out')) {
+                prev.line.innerHTML = html;
+                frenzies.set(ev.id, { t: nowT, count, line: prev.line });
+              } else frenzies.set(ev.id, { t: nowT, count, line: addFeed(html, false) });
+            }
           }
           break;
         case 'pickup':
-          if (ev.by === meId) showToast(PICKUP_LABELS[ev.kind] || String(ev.kind).toUpperCase(), PICKUP_COLORS[ev.kind]);
+          if (ev.by === meId && PICKUP_LABELS[ev.item]) showToast(PICKUP_LABELS[ev.item], PICKUP_COLORS[ev.item]);
           break;
         case 'carjack':
           if (ev.by === meId) showToast('УГОН! +$50', '#ffd23f');
@@ -487,6 +514,9 @@ export function createHud(root, world) {
           break;
         case 'leave':
           addLog(`<span class="sys leave">◂ ${esc(ev.name)} уехал из города</span>`);
+          break;
+        default:
+          if (ev.by === meId && PICKUP_LABELS[ev.kind]) showToast(PICKUP_LABELS[ev.kind], PICKUP_COLORS[ev.kind]);
           break;
       }
     },

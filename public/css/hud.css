@@ -563,3 +563,134 @@
 .h-keys .sec { grid-column: 1 / -1; margin-top: 6px; color: var(--pink); letter-spacing: 3px; font-size: 11px; }
 .h-join.out { animation: h-out .45s ease-in forwards; }
 @keyframes h-out { to { opacity: 0; transform: scale(1.08); } }
+
+.h-touchkeys { display: none; }
+
+.t-pad {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.t-stick {
+  position: absolute;
+  bottom: 36px;
+  width: 124px;
+  height: 124px;
+  margin: -62px 0 0 -62px;
+  border-radius: 50%;
+  border: 3px solid rgba(34, 230, 214, .45);
+  background: rgba(20, 10, 38, .28);
+  pointer-events: none;
+  opacity: .55;
+}
+.t-stick.left { left: 98px; top: auto; bottom: 36px; margin: 0 0 0 -62px; }
+.t-stick.right { left: calc(100% - 98px); bottom: 36px; margin: 0 0 0 -62px; border-color: rgba(255, 46, 136, .5); }
+.t-stick.on { bottom: auto; margin: -62px 0 0 -62px; opacity: 1; }
+.t-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: rgba(34, 230, 214, .7);
+  box-shadow: 0 0 0 3px #000;
+}
+.t-stick.right .t-knob { background: rgba(255, 46, 136, .75); }
+.t-btn {
+  position: absolute;
+  right: 14px;
+  width: 78px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--head, sans-serif);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #fff;
+  background: rgba(20, 10, 38, .78);
+  border: 2px solid var(--cyan, #22e6d6);
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px #000;
+  transform: skewX(-8deg);
+}
+.t-btn.fire { bottom: 176px; right: 104px; width: 86px; height: 56px; border-color: var(--pink, #ff2e88); font-size: 14px; }
+.t-btn.car { bottom: 236px; }
+.t-btn.wpn { bottom: 176px; }
+.t-btn.on { background: rgba(255, 46, 136, .7); }
+
+@media (pointer: coarse) {
+  .h-join .h-keys { display: none; }
+  .h-join .h-touchkeys { display: grid; }
+}
+
+@media (max-width: 900px) {
+  .h-money { font-size: 30px; top: 10px; right: 10px; letter-spacing: 1px; }
+  .h-mult { top: 44px; right: 12px; font-size: 12px; }
+  .h-wanted { top: 62px; left: auto; right: 10px; transform: none; gap: 2px; }
+  .h-wanted svg { width: 22px; height: 22px; }
+  .h-left { top: 10px; left: 10px; width: min(190px, 46vw); }
+  .h-weapon { gap: 6px; padding: 4px 8px 4px 6px; }
+  .h-weapon svg { width: 40px; height: 22px; }
+  .h-wname { font-size: 14px; }
+  .h-ammo { font-size: 18px; }
+  .h-bar { height: 14px; }
+  .h-bar b { font-size: 10px; }
+  .h-feed { top: 120px; left: 10px; right: auto; align-items: flex-start; max-width: calc(100vw - 20px); }
+  .h-feed div { font-size: 11px; padding: 2px 8px; }
+  .h-toast { font-size: 20px; top: 28%; }
+  .h-big { font-size: 22vw; letter-spacing: 1vw; }
+  .h-big.frenzy { font-size: 15vw; }
+  .h-big .sub { font-size: 16px; }
+  .h-mapwrap { width: 118px; height: 118px; padding: 3px; top: 92px; right: 10px; bottom: auto; border-width: 2px; border-radius: 10px; }
+  .h-maplabel { font-size: 9px; top: -11px; left: 6px; padding: 0 6px; }
+  .h-chat { left: 10px; bottom: 12px; width: min(460px, calc(100vw - 300px)); }
+  .h-radio { right: auto; left: 10px; bottom: auto; top: 100px; font-size: 11px; }
+  .h-hint { bottom: 96px; font-size: 13px; white-space: nowrap; }
+  .h-board { width: calc(100vw - 20px); padding: 12px; }
+  .h-board table { font-size: 13px; }
+  .h-panel { grid-template-columns: 1fr; gap: 14px; max-width: calc(100% - 24px); }
+  .h-logo { text-align: center; }
+  .h-logo .six { font-size: 110px; letter-spacing: -2px; }
+  .h-logo .gta { font-size: 18px; }
+  .h-logo .ed, .h-logo .mp { font-size: 12px; }
+}
+
+html.touch .h-chat { bottom: 200px; width: min(460px, calc(100vw - 20px)); }
+html.touch .h-hint { bottom: 300px; }
+
+.h-reject {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(10, 4, 22, .88);
+}
+.h-reject .t { font-family: var(--head); font-size: 64px; letter-spacing: 4px; color: var(--pink); transform: skewX(-10deg); }
+.h-reject .m { max-width: 520px; font-size: 18px; line-height: 1.4; color: #fff; }
+.h-reject button {
+  padding: 12px 34px;
+  font-family: var(--head);
+  font-size: 22px;
+  letter-spacing: 3px;
+  color: #000;
+  background: linear-gradient(90deg, var(--yellow), var(--pink));
+  border: 3px solid #000;
+  box-shadow: 5px 5px 0 #000;
+  transform: skewX(-8deg);
+  cursor: pointer;
+}
+@media (max-width: 900px) { .h-reject .t { font-size: 40px; } }

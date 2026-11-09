@@ -16,6 +16,7 @@ export function createAudio() {
   let radioNext = 0;
   let radioStep = 0;
   let lastView = null;
+  let lastFrenzy = -100;
 
   function build() {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -205,12 +206,34 @@ export function createAudio() {
     window.dispatchEvent(new CustomEvent('gta-radio', { detail: { on: radioOn } }));
   });
 
+  document.addEventListener('visibilitychange', () => {
+    if (!ctx) return;
+    try {
+      if (document.hidden) ctx.suspend();
+      else ctx.resume();
+    } catch {}
+  });
+
+  function silenceLoops(t) {
+    engGain.gain.cancelScheduledValues(t);
+    engGain.gain.setTargetAtTime(0, t, 0.05);
+    sirGain.gain.cancelScheduledValues(t);
+    sirGain.gain.setTargetAtTime(0, t, 0.05);
+    radioBus.gain.cancelScheduledValues(t);
+    radioBus.gain.setTargetAtTime(0, t, 0.05);
+    radioNext = 0;
+  }
+
   return {
     unlock() {
       try {
         if (!ctx) build();
-        if (ctx.state !== 'running') ctx.resume();
+        if (ctx.state !== 'running' && !document.hidden) ctx.resume();
       } catch {}
+    },
+
+    state() {
+      return ctx ? { state: ctx.state, eng: engGain.gain.value, sir: sirGain.gain.value, radio: radioBus.gain.value } : null;
     },
 
     event(ev, view) {
@@ -237,15 +260,24 @@ export function createAudio() {
           if (ev.id === meId) jingle([72, 76, 79, 84], 'triangle', 0.06, 0.3);
           break;
         case 'pickup':
+        case 'pistol':
+        case 'uzi':
+        case 'shotgun':
+        case 'rocket':
+        case 'health':
+        case 'armor':
+        case 'bribe': {
           if (ev.by !== meId) break;
-          if (ev.kind === 'cash' || ev.kind === 'bribe') jingle([76, 79, 84, 88], 'square', 0.06, 0.12);
-          else if (ev.kind === 'health' || ev.kind === 'armor') jingle([67, 72, 76], 'sine', 0.08, 0.35);
+          const kind = ev.kind === 'pickup' ? ev.item : ev.kind;
+          if (kind === 'cash' || kind === 'bribe') jingle([76, 79, 84, 88], 'square', 0.06, 0.12);
+          else if (kind === 'health' || kind === 'armor') jingle([67, 72, 76], 'sine', 0.08, 0.35);
           else {
             const t = ctx.currentTime;
             noise(t, 0.05, 0.4, 'highpass', 2000, 2000);
             noise(t + 0.12, 0.06, 0.5, 'bandpass', 1500, 1500, 2);
           }
           break;
+        }
         case 'carjack':
           if (ev.by === meId) {
             const t = ctx.currentTime;
@@ -260,7 +292,11 @@ export function createAudio() {
           if (ev.id === meId) stinger('busted');
           break;
         case 'frenzy':
-          if (ev.id === meId) stinger('frenzy');
+          if (ev.id === meId) {
+            const tf = ctx.currentTime;
+            if (tf - lastFrenzy > 6.5) stinger('frenzy');
+            lastFrenzy = tf;
+          }
           break;
         case 'chat':
           if (ev.from !== meId) tone('sine', 1200, 1500, ctx.currentTime, 0.08, 0.08);
@@ -273,6 +309,7 @@ export function createAudio() {
       lastView = view;
       const me = view.me || {};
       const t = ctx.currentTime;
+      if (!view.connected) { silenceLoops(t); return; }
       const driving = !!me.car && !me.dead;
       const sp = Math.abs(me.v || 0);
       const gear = Math.min(4, Math.floor(sp / 9));

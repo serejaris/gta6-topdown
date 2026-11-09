@@ -8,6 +8,7 @@ export function connect(name) {
     id: null,
     seed: null,
     connected: false,
+    rejected: null,
     name,
     send(msg) {
       if (ws && ws.readyState === 1) {
@@ -46,6 +47,10 @@ export function connect(name) {
       let msg;
       try { msg = JSON.parse(e.data); } catch { return; }
       if (!msg || !msg.t) return;
+      if (msg.t === 'reject') {
+        closedByUser = true;
+        net.rejected = String(msg.reason || 'reject');
+      }
       if (msg.t === 'welcome') {
         net.id = msg.id;
         net.seed = msg.seed;
@@ -54,9 +59,14 @@ export function connect(name) {
       }
       emit(msg.t, msg);
     };
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       const was = net.connected;
       net.connected = false;
+      if (e && e.code >= 4001 && e.code <= 4003 && !net.rejected) {
+        net.rejected = ['full', 'ip', 'banned'][e.code - 4001];
+        emit('reject', { t: 'reject', reason: net.rejected });
+      }
+      if (net.rejected) closedByUser = true;
       if (was) emit('close', {});
       if (closedByUser) return;
       retry++;
