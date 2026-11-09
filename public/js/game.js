@@ -21,11 +21,11 @@ function toMap(arr) {
   return m;
 }
 
-function interpList(m0, m1, t) {
+function interpList(m0, m1, t, gap = 0.1) {
   const out = [];
   for (const [id, b] of m1) {
     const a = m0 && m0.get(id);
-    if (!a) { out.push({ ...b }); continue; }
+    if (!a || Math.hypot(b.x - a.x, b.z - a.z) > 15 + Math.abs(b.v || 0) * gap * 1.5) { out.push({ ...b }); continue; }
     const o = { ...b };
     o.x = lerp(a.x, b.x, t);
     o.z = lerp(a.z, b.z, t);
@@ -122,6 +122,9 @@ export function createGame({ world, net, bot = false }) {
   }
 
   function adoptServerPose(srv) {
+    if (local.have && Math.hypot(srv.x - local.x, srv.z - local.z) > 60) {
+      try { renderer?.resetCamera?.(); } catch {}
+    }
     local.x = srv.x;
     local.z = srv.z;
     local.a = srv.a || 0;
@@ -266,9 +269,9 @@ export function createGame({ world, net, bot = false }) {
     }
     const k = s1.t > s0.t ? clamp((rt - s0.t) / (s1.t - s0.t), 0, 1) : 1;
     return {
-      players: interpList(s0.players, s1.players, k),
-      cars: interpList(s0.cars, s1.cars, k),
-      peds: interpList(s0.peds, s1.peds, k),
+      players: interpList(s0.players, s1.players, k, s1.t - s0.t),
+      cars: interpList(s0.cars, s1.cars, k, s1.t - s0.t),
+      peds: interpList(s0.peds, s1.peds, k, s1.t - s0.t),
       pickups: snaps[snaps.length - 1].pickups,
     };
   }
