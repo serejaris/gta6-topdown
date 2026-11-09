@@ -23,6 +23,7 @@ const RAM_LEVEL = 3;
 const RAM_CD = 4;
 const RAM_DMG = 10;
 const HIT_CREDIT_T = 5;
+const TEMP_PED_T = 30;
 
 const rand = Math.random;
 const r2 = (n) => Math.round(n * 100) / 100;
@@ -282,7 +283,7 @@ export function createSim(broadcast, send = () => {}) {
   function spawnFreePed(x, z, kind) {
     const ped = {
       id: nextId++, kind, x, z, a: 0, v: 0, hp: 20, dead: false, deadAt: 0,
-      bi: 0, bj: 0, p: 0, dir: 1, speed: 1.4, fleeUntil: now + 6, cross: null, pause: 0,
+      bi: 0, bj: 0, p: 0, dir: 1, speed: 1.4, fleeUntil: now + 6, cross: null, pause: 0, temp: true, bornAt: now,
     };
     const b = blockNear(x, z);
     const p = ringNearest(b, x, z);
@@ -880,6 +881,12 @@ export function createSim(broadcast, send = () => {}) {
   }
 
   function stepPeds(dt) {
+    for (let k = peds.length - 1; k >= 0; k--) {
+      const ped = peds[k];
+      if (!ped.temp) continue;
+      const old = now - ped.bornAt;
+      if ((ped.dead && now - ped.deadAt > 15) || (!ped.dead && ((old > TEMP_PED_T && farFromPlayers(ped.x, ped.z, 60)) || old > TEMP_PED_T * 3))) peds.splice(k, 1);
+    }
     for (const ped of peds) {
       if (ped.dead) {
         if (now - ped.deadAt > 15) {
