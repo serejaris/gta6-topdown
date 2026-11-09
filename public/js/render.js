@@ -135,9 +135,9 @@ export function createRenderer(canvas, world) {
     }
     const lead = me.car != null ? Math.min(v, 40) * 0.35 : 0;
     const lx = Math.sin(a) * lead, lz = Math.cos(a) * lead;
-    let hh = me.car != null ? 45 + Math.min(1, v / 36) * 30 : 38;
-    const tall = city.maxHeightNear(tx, tz, 26);
-    hh = Math.max(hh, tall + 22);
+    let hh = me.car != null ? 32 + Math.min(1, v / 30) * 18 : 30;
+    const tall = city.maxHeightNear(tx, tz, 14);
+    hh = Math.max(hh, Math.min(tall + 6, hh + 14));
     if (!cam.init) { cam.ox = lx; cam.oz = lz; cam.h = hh; cam.init = true; }
     const k = 1 - Math.exp(-dt * 4);
     cam.ox += (lx - cam.ox) * k;
@@ -151,7 +151,7 @@ export function createRenderer(canvas, world) {
     camera.lookAt(cam.x + sx, 0, cam.z + sz);
     fadeUniforms.uCam.value.copy(camera.position);
     fadeUniforms.uTarget.value.set(tx, 1.2, tz);
-    fadeUniforms.uFadeR.value = me.car != null ? 9 : 6.5;
+    fadeUniforms.uFadeR.value = me.car != null ? 7 : 4.5;
     scene.fog.near = cam.h + 10;
     scene.fog.far = cam.h + 220;
     const snap = 160 / sun.shadow.mapSize.x;
@@ -176,7 +176,7 @@ export function createRenderer(canvas, world) {
     sync(peds, view.peds, makePed, posePed, dt, t);
 
     sync(players, view.players, (o) => {
-      const h = makeHuman(T, { shirt: o.color || '#ffcc00', pants: '#1d2433', skin: '#e0ac69', hair: '#1b1410' });
+      const h = makeHuman(T, { shirt: o.color || '#ffcc00', pants: '#1d2433', skin: '#f1c27d', hair: '#f4dfb4', player: true });
       h.tag = makeNameTag(o.name || 'player', o.color);
       h.g.add(h.tag);
       return h;
@@ -254,9 +254,14 @@ export function createRenderer(canvas, world) {
 
   window.addEventListener('resize', resize);
 
+  function resetCamera() {
+    cam.init = false;
+  }
+
   return {
     update,
     resize,
+    resetCamera,
     effect: (ev) => fx.effect(ev),
     screenToGround,
     camera,
