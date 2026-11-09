@@ -79,7 +79,7 @@ function start(name) {
   let last = performance.now();
   function frame(ts) {
     requestAnimationFrame(frame);
-    const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000));
+    const dt = Math.min(0.25,Math.max(0, (ts - last) / 1000));
     last = ts;
     const inp = input.frame();
     let view;

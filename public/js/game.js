@@ -500,20 +500,35 @@ export function createGame({ world, net, bot = false }) {
     }
 
     let goal = null;
-    if (b.footTime > 5) {
-      let bd = 150 * 150;
+    if (b.footTime > 2.5) {
+      let bd = 150;
+      let car = null;
       for (const c of view.cars) {
         if (c.wreck || b.blacklist.has(c.id)) continue;
         if (c.driver != null && c.driver !== 'npc') continue;
-        const dx = c.x - local.x, dz = c.z - local.z;
-        const d2 = dx * dx + dz * dz;
-        if (d2 < bd) { bd = d2; goal = c; }
+        const d = Math.hypot(c.x - local.x, c.z - local.z);
+        const along = (local.x - c.x) * Math.sin(c.a) + (local.z - c.z) * Math.cos(c.a);
+        const score = d + (Math.abs(c.v || 0) > 1.5 && along < 2 ? 100 : 0);
+        if (score < bd) { bd = score; car = c; }
       }
-    }
-    if (goal && view.nearCar === goal.id && t - b.lastEnter > 1) {
-      it.enter = true;
-      b.lastEnter = t;
-      b.enterCar = goal.id;
+      if (car) {
+        const d = Math.hypot(car.x - local.x, car.z - local.z);
+        const sp = Math.abs(car.v || 0);
+        const fx = Math.sin(car.a), fz = Math.cos(car.a);
+        const along = (local.x - car.x) * fx + (local.z - car.z) * fz;
+        if (sp > 1.5 && d > 3) {
+          const lead = along > 4 ? along : Math.min(9, 3 + sp * 0.5);
+          goal = { x: car.x + fx * lead, z: car.z + fz * lead };
+        } else goal = car;
+        if (view.nearCar != null && t - b.lastEnter > 1) {
+          const nc = view.cars.find((c) => c.id === view.nearCar);
+          if (nc && (nc.driver == null || nc.driver === 'npc') && !b.blacklist.has(nc.id)) {
+            it.enter = true;
+            b.lastEnter = t;
+            b.enterCar = nc.id;
+          }
+        }
+      }
     }
     if (!goal) {
       if (!b.wanderTarget || Math.hypot(b.wanderTarget.x - local.x, b.wanderTarget.z - local.z) < 3) {
@@ -557,13 +572,19 @@ export function createGame({ world, net, bot = false }) {
       view.players = ip.players;
     }
 
-    const it = bot ? botIntent(dt) : humanIntent(inp);
-    if (!bot && inp && inp.mouseMoved && it.aimX == null && view.me.aimX) { it.aimX = view.me.aimX; it.aimZ = view.me.aimZ; }
-
-    if (local.have && !local.dead) {
-      if (local.car != null && local.cs) stepCar(dt, it);
-      else stepFoot(dt, it);
+    const steps = Math.max(1, Math.ceil(dt / 0.034));
+    const sdt = dt / steps;
+    let it = null;
+    for (let s = 0; s < steps; s++) {
+      const si = bot ? botIntent(sdt) : (it ? { ...it, enter: false, weapon: null, weaponDelta: 0 } : humanIntent(inp));
+      if (!it) it = si;
+      else if (bot) it = { ...si, enter: it.enter || si.enter, weapon: it.weapon ?? si.weapon };
+      if (local.have && !local.dead) {
+        if (local.car != null && local.cs) stepCar(sdt, si);
+        else stepFoot(sdt, si);
+      }
     }
+    if (!bot && inp && inp.mouseMoved && it.aimX == null && view.me.aimX) { it.aimX = view.me.aimX; it.aimZ = view.me.aimZ; }
 
     let aimX = it.aimX, aimZ = it.aimZ;
     if (aimX == null) {

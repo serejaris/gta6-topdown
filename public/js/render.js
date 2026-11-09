@@ -168,7 +168,7 @@ export function createRenderer(canvas, world) {
         if (c) h.g.position.set(c.x, 0.15, c.z);
       }
       const off = inCar ? 3.4 : 2.2, ra = h.g.rotation.y;
-      h.tag.position.set(-Math.sin(-ra) * -off * 0 + Math.sin(ra) * off, 4, -Math.cos(ra) * off);
+      h.tag.position.set(Math.sin(ra) * off, 4,-Math.cos(ra) * off);
     }, dt, t);
 
     sync(cars, view.cars, (o) => makeCar(T, o.type | 0, o.color, !!o.cop || o.type === 4), (c, o, d) => {

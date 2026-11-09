@@ -78,7 +78,7 @@ function decalPool(scene, tex, max, opts = {}) {
 }
 
 const C = (h) => new THREE.Color(h);
-const FIRE0 = C('#fff2b0'), FIRE1 = C('#ff4a10'), SMOKE0 = C('#4a3a40'), SMOKE1 = C('#2a2230');
+const FIRE0 = C('#fff2b0'), FIRE1 = C('#ff3a08'), FIRE_A = C('#ffb347'), SMOKE0 = C('#4a3a40'), SMOKE1 = C('#2a2230');
 const SPARK0 = C('#fff8d0'), SPARK1 = C('#ff9a20'), BLOOD0 = C('#b0101a'), BLOOD1 = C('#5a0008');
 
 export function createFx(scene, T) {
@@ -161,9 +161,10 @@ export function createFx(scene, T) {
   }
   function explode(ev) {
     const r = ev.r || 7;
+    add.spawn(ev.x, 2, ev.z, 0, 0, 0, 0.18, r * 1.2, r * 2.4, FIRE0, FIRE1, 0.9, 0);
     for (let k = 0; k < 90; k++) {
-      const a = R() * Math.PI * 2, s = R() * r * 2.2;
-      add.spawn(ev.x, 0.8 + R() * 2, ev.z, Math.sin(a) * s, 2 + R() * 9, Math.cos(a) * s, 0.4 + R() * 0.6, 2.5 + R() * 2, 0.8, FIRE0, FIRE1, 1, 0, 2.2, 2);
+      const a = R() * Math.PI * 2, s = r * (0.5 + R() * 1.6);
+      add.spawn(ev.x + Math.sin(a), 0.8 + R() * 2, ev.z + Math.cos(a), Math.sin(a) * s, 1 + R() * 4, Math.cos(a) * s, 0.5 + R() * 0.6, 3 + R() * 2, 1, FIRE_A, FIRE1, 0.55, 0, 2.6, 2);
     }
     for (let k = 0; k < 40; k++) {
       const a = R() * Math.PI * 2, s = R() * r;
