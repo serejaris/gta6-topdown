@@ -1,0 +1,124 @@
+# GTA 6 (в духе GTA 2) — контракт модулей
+
+Вид сверху, 3D (three.js), мультиплеер по WebSocket. Город Leonida/Vice: неон, пальмы, пляж. Без сборщика: ES-модули, importmap. Комментарии в коде не писать. Каждый агент правит только свои файлы.
+
+## Координаты
+
+- Плоскость XZ, Y вверх. Единица — метр. Мир `[0, world.size]` по X и Z (860 м).
+- Угол `a` в радианах: направление вперёд = `(sin a, cos a)` в (x, z). `a = 0` смотрит в +Z.
+- Мир детерминирован: `generateWorld(seed)` из `/shared/world.js` (одинаков на сервере и клиенте). Не менять сигнатуры в `shared/world.js`; экспортирует `CFG, generateWorld, isRoad, collideCircle, raycast, WEAPONS, CAR_TYPES, mulberry32`.
+- Дороги: осевые линии `world.roads[i]` (и по X, и по Z), ширина асфальта `CFG.ROAD = 20`, правостороннее движение, полосы на ±3 и ±7 от оси. Тротуар — кромка квартала шириной 4.
+
+## Файлы и владельцы
+
+| Файл | Владелец |
+|---|---|
+| `shared/world.js`, `public/index.html`, `CONTRACT.md` | оркестратор |
+| `server.js`, `server/*.js` | агент server |
+| `public/js/render.js`, `public/js/render/*.js` | агент render |
+| `public/js/main.js`, `public/js/net.js`, `public/js/game.js`, `public/js/input.js` | агент game |
+| `public/js/hud.js`, `public/js/audio.js`, `public/css/hud.css` | агент hud |
+
+`public/index.html` даёт: `<canvas id="c">`, `<div id="hud">`, importmap `three` → `/vendor/three.module.js`, `<link href="/css/hud.css">`, `<script type="module" src="/js/main.js">`.
+
+## Сервер (`server.js`)
+
+- `node server.js`, порт `process.env.PORT || 3000`, слушать `0.0.0.0`.
+- Статика: `/` → `public/`, `/shared/*` → `shared/`, `/vendor/three.module.js` → `node_modules/three/build/three.module.js` (и `/vendor/*` из `node_modules/three/build/`, `/vendor/addons/*` из `node_modules/three/examples/jsm/`). `GET /health` → `ok`.
+- WebSocket на пути `/ws`, сообщения JSON. Одна общая комната, seed мира фиксирован (`SEED = 6`).
+- Тик симуляции 20 Гц, снапшот всем 10 Гц.
+- Сервер владеет: NPC-машины (ездят по сетке дорог, ~35), пешеходы (ходят по тротуарам, ~50, убегают от выстрелов), полиция, пикапы, HP, деньги, розыск, попадания.
+- Игрок владеет своей позицией (клиент-авторитет): пешком — своей, за рулём — позой машины. Сервер только ограничивает скорость телепорта (анти-мусор, мягко).
+
+### Клиент → сервер
+
+| Сообщение | Смысл |
+|---|---|
+| `{t:'join', name}` | вход; ответ `welcome` |
+| `{t:'st', x, z, a, v}` | 15 Гц; поза игрока или его машины, `v` — скорость со знаком, м/с |
+| `{t:'enter', car}` | сесть в машину `id` (сервер проверяет дистанцию < 4 м; NPC-водителя выкидывает пешеходом; +розыск) |
+| `{t:'exit'}` | выйти |
+| `{t:'shoot', x, z, a, w}` | выстрел из оружия `w`; сервер считает попадания (`raycast` по домам, круги по целям) |
+| `{t:'weapon', w}` | смена оружия |
+| `{t:'respawn'}` | после смерти/ареста |
+| `{t:'chat', text}` | чат, до 120 символов |
+
+### Сервер → клиент
+
+`{t:'welcome', id, seed, tickRate}`
+
+`{t:'snap', time, players, cars, peds, pickups}` — массивы объектов:
+
+- player: `{id, name, x, z, a, v, hp, armor, car, w, ammo, money, wanted, kills, deaths, dead, color}`; `car` — id машины или `null`; `wanted` 0–5; `ammo` — патроны текущего оружия; `dead` — bool.
+- car: `{id, x, z, a, v, type, color, hp, driver, cop, siren, wreck}`; `type` — индекс `CAR_TYPES`; `driver`: id игрока, `'npc'` или `null`; `color` — `#rrggbb`; `wreck` — сгоревший остов.
+- ped: `{id, x, z, a, v, kind, dead}`; `kind`: `0..5` — гражданские (вариант одежды), `'cop'` — полицейский пешком.
+- pickup: `{id, x, z, kind}`; `kind`: `'pistol'|'uzi'|'shotgun'|'rocket'|'health'|'armor'|'cash'|'bribe'`.
+
+`{t:'ev', kind, ...}` — события:
+
+- `shot` `{by, x, z, a, w, dist}` — трасса длиной `dist`.
+- `hit` `{x, z, target:'ped'|'player'|'car'|'wall'}`
+- `explode` `{x, z, r}`
+- `kill` `{killer, killerName, victim, victimName, how}` — `victim` может быть `null` для NPC (тогда `victimName:'pedestrian'|'cop'`).
+- `wasted` `{id}`, `busted` `{id}` — игрок убит / арестован (арест: коп пешком рядом с игроком, стоящим пешком с розыском).
+- `pickup` `{id, kind, by}`, `carjack` `{by, car}`, `cash` `{id, amount, x, z}`
+- `chat` `{from, name, text}`, `join` `{id, name}`, `leave` `{id, name}`
+- `frenzy` `{id, count}` — серия убийств (3+ за 6 с).
+
+### Правила мира (сервер)
+
+- Деньги: +10 за сбитого/убитого пешехода, +100 коп, +500 игрок, +50 угон, пикап cash +100..500. Счёт лидеров по деньгам.
+- Розыск: убийство пешехода +0.5, угон +0.5, коп +1.5, игрок +1; спадает на 1 за 25 с без преступлений и вне поля зрения копов (30 м). `bribe` обнуляет.
+- Полиция: при `wanted >= 1` спавнятся патрульные машины (число ~ уровню, до 6) в 60–90 м по дорогам, преследуют (seek по сетке дорог + прямой таран вблизи), на 3+ стреляют копы-пешеходы. Арест — `busted`: минус половина денег, оружие сброшено.
+- Машина: HP падает от пуль и ударов; при 0 — `explode` через 2 с, урон в радиусе 7, остаётся `wreck`. Наезд машиной игрока на скорости > 6 м/с убивает пешехода/ранит игрока.
+- Смерть: `wasted`, через 3 с клиент шлёт `respawn`; спавн в случайной `world.spawnPoints`, HP 100, пистолет 60 патронов.
+- NPC-машины останавливаются перед препятствием, объезжают остовы, респавнятся вдали от игроков.
+
+## Клиент
+
+### Состояние вида `view` (собирает `game.js`, читают `render.js` и `hud.js`)
+
+```js
+view = {
+  time,              // сек, локальное
+  world,             // generateWorld(seed)
+  me: { id, x, z, a, v, car, hp, armor, w, ammo, money, wanted, kills, deaths, dead, name, aimX, aimZ },
+  players: [ ...как в snap, интерполированные, включая меня (моя поза — локальная) ],
+  cars: [ ...как в snap, интерполированные; моя машина — локальная поза ],
+  peds: [ ... ],
+  pickups: [ ... ],
+  nearCar,           // id ближайшей машины, в которую можно сесть, или null
+  connected,         // bool
+}
+```
+
+### `render.js` (агент render)
+
+```js
+export function createRenderer(canvas, world)
+// → { update(view, dt), resize(), effect(ev), screenToGround(clientX, clientY) → {x, z}, camera }
+```
+
+- `effect(ev)` получает события `ev` сервера (`shot`, `hit`, `explode`, `cash`, ...) и рисует трассы, вспышки, взрывы, кровь, всплывающие `+$`.
+- Камера как в GTA 2: строго сверху с перспективой (дома «заваливаются» от центра), высота растёт со скоростью (пешком ~38 м, на машине 45–75 м), плавное следование.
+- `screenToGround` — пересечение луча мыши с плоскостью y=0 (для прицела).
+
+### `hud.js` и `audio.js` (агент hud)
+
+```js
+export function createHud(root, world)
+// → { showJoin(onJoin(name)), update(view, dt), event(ev, view), isTyping() → bool, onChat(cb(text)) }
+export function createAudio()
+// → { unlock(), event(ev, view), update(view, dt) }
+```
+
+- HUD в духе GTA 2: деньги крупно сверху справа, розыск (головы копов/звёзды) сверху по центру, оружие и патроны, HP/броня, миникарта (canvas, дороги и точки игроков/копов), килл-фид, огромные «WASTED» / «BUSTED», «KILL FRENZY!», таблица лидеров (Tab), чат (T/Enter), подсказка «F — сесть в машину» при `view.nearCar`, экран входа с именем и управлением.
+- Звук процедурный (WebAudio): выстрелы по типам, взрыв, двигатель (по `me.v` когда `me.car`), сирена рядом, шаги не нужны, джингл денег, «wasted».
+
+### `main.js`, `net.js`, `game.js`, `input.js` (агент game)
+
+- `main.js`: `hud.showJoin` → подключение `net` → `welcome` → `generateWorld(seed)` → `createRenderer` → цикл `requestAnimationFrame`: ввод → локальная физика → интерполяция снапшотов (буфер ~120 мс) → `view` → `renderer.update`, `hud.update`, `audio.update`; события сервера → `renderer.effect`, `hud.event`, `audio.event`.
+- Управление: пешком WASD (относительно экрана) + прицел мышью, ЛКМ — огонь, `1–5`/колесо — оружие, `F`/`Enter` — сесть/выйти, `Shift` — бег. В машине: `W/S` газ/тормоз-задний, `A/D` руль, `Space` — ручник (дрифт), ЛКМ — драйв-бай из Uzi/пистолета по курсу прицела. Стрелки дублируют WASD. Когда `hud.isTyping()` — ввод игнорировать.
+- Физика машины аркадная: разгон/торможение по `CAR_TYPES`, руль зависит от скорости, боковое сцепление с заносом на ручнике, столкновение с домами через `collideCircle` (2 круга по длине) с отскоком и потерей скорости, столкновения с другими машинами — расталкивание кругами.
+- `net.js`: `connect(name)` → `{ send(msg), on(type, cb), id, seed }`; URL `ws(s)://<location.host>/ws`; автопереподключение.
+- `window.__game = { view, net }` для отладки и автотестов; параметр `?name=Bot&auto=1` пропускает экран входа (автовход с именем) — нужен для headless-проверок.

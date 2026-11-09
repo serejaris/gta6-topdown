@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTA 6 — top-down edition</title>
+<meta property="og:title" content="GTA 6 — top-down edition">
+<meta property="og:description" content="GTA 6 до выхода GTA 6. Вид сверху, как в GTA 2. Мультиплеер в браузере.">
+<link rel="stylesheet" href="/css/hud.css">
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;inset:0;pointer-events:none}
+</style>
+<script type="importmap">
+{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/addons/"}}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
