@@ -425,9 +425,22 @@ export function createGame({ world, net, bot = false }) {
   function findNearCar() {
     if (local.car != null || local.dead) return null;
     let best = null, bd = ENTER_DIST * ENTER_DIST;
+    const last = snaps[snaps.length - 1];
+    const prev = snaps.length > 1 ? snaps[snaps.length - 2] : null;
+    const ahead = last && clock.off != null ? clamp(now() - clock.off - last.t, 0, 0.3) : 0;
     for (const c of view.cars) {
-      if (c.wreck) continue;
-      const dx = c.x - local.x, dz = c.z - local.z;
+      if (c.wreck || typeof c.driver === 'number') continue;
+      let cx = c.x, cz = c.z;
+      const sc = last?.cars.get(c.id);
+      if (sc && Math.abs(sc.v || 0) > 0.5 && !(exitedCar && exitedCar.id === c.id)) {
+        const pc = prev?.cars.get(c.id);
+        const gap = prev ? last.t - prev.t : 0;
+        let vx = (sc.v || 0) * Math.sin(sc.a || 0), vz = (sc.v || 0) * Math.cos(sc.a || 0);
+        if (pc && gap > 0.01 && Math.hypot(sc.x - pc.x, sc.z - pc.z) < 15) { vx = (sc.x - pc.x) / gap; vz = (sc.z - pc.z) / gap; }
+        cx = sc.x + vx * ahead;
+        cz = sc.z + vz * ahead;
+      }
+      const dx = cx - local.x, dz = cz - local.z;
       const d2 = dx * dx + dz * dz;
       if (d2 < bd) { bd = d2; best = c.id; }
     }
