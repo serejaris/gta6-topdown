@@ -6,27 +6,28 @@ import { createFx } from './render/fx.js';
 import { makeHuman, poseHuman, pedLook, makeNameTag, makeMarker, makeCar, poseCar, makePickup, posePickup, disposeCar, disposePickup, disposeHuman } from './render/actors.js';
 import { createQuality } from './render/quality.js';
 
-const FOG = 0x6a3a78;
+const FOG = 0x3b3442;
 
 export function createRenderer(canvas, world) {
   const params = new URLSearchParams(location.search);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = !params.has('noshadow');
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(FOG);
-  scene.fog = new THREE.Fog(0xb0507e, 60, 260);
+  scene.fog = new THREE.Fog(0x6c5a6a, 60, 260);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 1, 900);
   camera.up.set(0, 0, -1);
 
-  const hemi = new THREE.HemisphereLight(0xffa6d8, 0x4a2a5a, 1.25);
+  const hemi = new THREE.HemisphereLight(0xcfc2c8, 0x3a3444, 1.3);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffb070, 2.3);
+  const sun = new THREE.DirectionalLight(0xffcf98, 2.1);
+  sun.shadow.intensity = 0.8;
   const sunDir = new THREE.Vector3(-0.7, 0.75, 0.35).normalize();
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -35,9 +36,25 @@ export function createRenderer(canvas, world) {
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target);
-  const rim = new THREE.DirectionalLight(0x6a8cff, 0.45);
+  const rim = new THREE.DirectionalLight(0x7a8cc0, 0.4);
   rim.position.set(1, 1, -0.6);
   scene.add(rim);
+
+  if (!params.has('novignette')) {
+    const nc = document.createElement('canvas');
+    nc.width = nc.height = 128;
+    const ng = nc.getContext('2d');
+    const nd = ng.createImageData(128, 128);
+    for (let i = 0; i < nd.data.length; i += 4) {
+      const v = Math.random() < 0.5 ? 0 : 255;
+      nd.data[i] = nd.data[i + 1] = nd.data[i + 2] = v;
+      nd.data[i + 3] = 6 + Math.random() * 10;
+    }
+    ng.putImageData(nd, 0, 0);
+    const vg = document.createElement('div');
+    vg.style.cssText = `position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse 75% 70% at 50% 50%,rgba(12,8,18,0) 55%,rgba(12,8,18,.5) 100%),url(${nc.toDataURL()})`;
+    canvas.after(vg);
+  }
 
   const T = makeTextures();
   T.road.anisotropy = renderer.capabilities.getMaxAnisotropy();

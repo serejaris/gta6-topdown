@@ -6,6 +6,9 @@ export function renderHeight(h) {
   return h <= 18 ? h : 18 + (h - 18) * 0.32;
 }
 
+const ROOF = new THREE.Color('#3c393f');
+const CORNICE = new THREE.Color('#8c8288');
+const hsl = {};
 const NEON = ['#ff2fa0', '#22f0ff', '#b14dff', '#ffe14d', '#ff6a3d', '#39ff88', '#ff4fd8'];
 
 function mergeGeos(list0) {
@@ -130,15 +133,17 @@ export function buildCity(scene, world, T) {
     const hr = renderHeight(b.h);
     heights.set(b.id, hr);
     const base = new THREE.Color(b.color);
+    base.getHSL(hsl);
+    base.setHSL(hsl.h, hsl.s * 0.6, hsl.l * 0.92);
     const down = b.district === 'downtown';
     const sub = b.district === 'suburb';
     const cw = down ? 2.8 : sub ? 3.6 : 3.2;
     const chh = down ? 3.4 : sub ? 2.8 : 3.1;
     const wallC = base.clone().multiplyScalar(0.92);
     walls.box(b.x0, 0.15, b.z0, b.x1, hr, b.z1, wallC, { cellW: cw * 8, cellH: chh * 8, offU: Math.floor(rnd() * 8) / 8, offV: Math.floor(rnd() * 8) / 8, noTop: true });
-    const roofC = tmpC.copy(base).lerp(new THREE.Color('#8a8088'), 0.6).clone();
+    const roofC = tmpC.copy(base).lerp(ROOF, 0.75).clone();
     roofs.box(b.x0, hr - 0.01, b.z0, b.x1, hr, b.z1, roofC, { noSides: true, roofScale: 8 });
-    const pc = base.clone().multiplyScalar(0.7);
+    const pc = base.clone().lerp(CORNICE, 0.4);
     const p = 0.35, ph = sub ? 0.4 : 0.9;
     trim.box(b.x0, hr, b.z0, b.x1, hr + ph, b.z0 + p, pc);
     trim.box(b.x0, hr, b.z1 - p, b.x1, hr + ph, b.z1, pc);
@@ -192,7 +197,7 @@ export function buildCity(scene, world, T) {
     }
   }
 
-  const wallMat = patchFade(new THREE.MeshLambertMaterial({ map: T.facade, emissiveMap: T.facadeEmit, emissive: 0xffffff, emissiveIntensity: 0.95, vertexColors: true }));
+  const wallMat = patchFade(new THREE.MeshLambertMaterial({ map: T.facade, emissiveMap: T.facadeEmit, emissive: 0xffffff, emissiveIntensity: 0.6, vertexColors: true }));
   const wallMesh = new THREE.Mesh(walls.geometry(), wallMat);
   wallMesh.castShadow = wallMesh.receiveShadow = true;
   group.add(wallMesh);
