@@ -331,7 +331,7 @@ export function createSim(broadcast, send = () => {}) {
   }
 
   const carById = (id) => cars.find((c) => c.id === id);
-  const level = (p) => Math.min(5, Math.ceil(p.wanted - 1e-6));
+  const level = (p) => Math.min(5, Math.floor(p.wanted + 1e-6));
 
   function crime(p, amount) {
     if (!p) return;
@@ -961,10 +961,6 @@ export function createSim(broadcast, send = () => {}) {
       cop.a = Math.atan2(tgt.x - cop.x, tgt.z - cop.z);
       cop.v = speed;
       if (tgt.car == null && d < 1.6) { bust(tgt); continue; }
-      if (tgt.car != null && d < 3) {
-        const car = carById(tgt.car);
-        if (car && Math.abs(car.v) < 0.6) { bust(tgt); continue; }
-      }
       if (lv >= 3 && d < 25 && now - cop.lastShot > 1.3) {
         const ang = Math.atan2(tgt.x - cop.x, tgt.z - cop.z) + (rand() * 2 - 1) * 0.08;
         const wall = raycast(world, cop.x, cop.z, Math.sin(ang), Math.cos(ang), d);
@@ -997,14 +993,13 @@ export function createSim(broadcast, send = () => {}) {
 
   function stepPolice(dt) {
     for (const p of players.values()) {
-      const lv = level(p);
-      if (p.dead || lv === 0) continue;
+      if (p.dead || p.wanted <= 0) continue;
       let seen = false;
       for (const c of cops) if (!c.dead && dist2(c.x, c.z, p.x, p.z) < 900) { seen = true; break; }
       if (!seen) for (const c of cars) if (c.cop && c.driver === 'npc' && !c.wreck && dist2(c.x, c.z, p.x, p.z) < 900) { seen = true; break; }
       if (seen) p.decayFrom = now;
       if (now - Math.max(p.lastCrime, p.decayFrom) >= 25) {
-        p.wanted = Math.max(0, Math.ceil(p.wanted - 1e-6) - 1);
+        p.wanted = Math.max(0, p.wanted - 1);
         p.decayFrom = now;
       }
     }
